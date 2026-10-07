@@ -1,0 +1,46 @@
+{
+  "dump": "49-node-hcp-raw.ndjson",
+  "control_plane_namespaces": 1,
+  "job": {
+    "name": "cluster-density-v2",
+    "worker_nodes": 49,
+    "iterations": 490,
+    "qps": 20,
+    "burst": 20,
+    "achieved_qps": 4.567,
+    "passed": true
+  },
+  "phases": [
+    {
+      "name": "create",
+      "start": "2026-08-14T16:19:44.151087+00:00",
+      "end": "2026-08-14T16:36:09.349504+00:00",
+      "start_minute": 0.0,
+      "end_minute": 16.4
+    },
+    {
+      "name": "churn",
+      "start": "2026-08-14T16:36:09.349504+00:00",
+      "end": "2026-08-14T16:59:14.687384+00:00",
+      "start_minute": 16.4,
+      "end_minute": 39.5
+    }
+  ],
+  "pods_seen": 67,
+  "containers_seen": 146,
+  "duplicate_samples_skipped": 0,
+  "cpu": {
+    "first_sample": "2026-08-14T16:19:44.151000+00:00",
+    "last_sample": "2026-08-14T16:59:25.880000+00:00",
+    "samples": 81,
+    "interval_seconds": 30.0,
+    "gaps": []
+  },
+  "memory": {
+    "first_sample": "2026-08-14T16:19:44.151000+00:00",
+    "last_sample": "2026-08-14T16:59:25.880000+00:00",
+    "samples": 81,
+    "interval_seconds": 30.0,
+    "gaps": []
+  }
+}

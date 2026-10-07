@@ -1,0 +1,46 @@
+{
+  "dump": "250-node-aro-hcp.ndjson.gz",
+  "control_plane_namespaces": 1,
+  "job": {
+    "name": "cluster-density-v2",
+    "worker_nodes": 250,
+    "iterations": 2250,
+    "qps": 20,
+    "burst": 20,
+    "achieved_qps": null,
+    "passed": true
+  },
+  "phases": [
+    {
+      "name": "create",
+      "start": "2025-10-23T17:41:45.322158+00:00",
+      "end": "2025-10-23T18:58:17.288314+00:00",
+      "start_minute": 0.0,
+      "end_minute": 76.5
+    },
+    {
+      "name": "churn",
+      "start": "2025-10-23T18:58:17.288314+00:00",
+      "end": "2025-10-23T20:01:10.266620+00:00",
+      "start_minute": 76.5,
+      "end_minute": 139.4
+    }
+  ],
+  "pods_seen": 65,
+  "containers_seen": 135,
+  "duplicate_samples_skipped": 60397,
+  "cpu": {
+    "first_sample": "2025-10-23T17:41:45+00:00",
+    "last_sample": "2025-10-23T20:01:10+00:00",
+    "samples": 280,
+    "interval_seconds": 30.0,
+    "gaps": []
+  },
+  "memory": {
+    "first_sample": "2025-10-23T17:41:45+00:00",
+    "last_sample": "2025-10-23T20:01:10+00:00",
+    "samples": 280,
+    "interval_seconds": 30.0,
+    "gaps": []
+  }
+}
