@@ -51,7 +51,7 @@ import numpy as np
 
 from hcputil import opener
 from plot_controlplane_usage import (BYTES_TO_GIB, CPU_METRIC, CPU_TO_CORES, MEMORY_METRIC, SMOOTH_MINUTES,
-                                     parse_time, rolling_average)
+                                     filled_in_total, parse_time, rolling_average)
 
 # The last reading usually lands a fraction of a second after the churn phase ends, so the window's
 # end is stretched by 1 s to include it. (In the 49-node run it lands 11 s later and is left out.)
@@ -256,18 +256,9 @@ def total_usage(copies, smooth_minutes, percentiles):
     reading are filled in along a straight line between its neighboring readings, so they don't
     count as zero; the share filled in is the part of the summed readings that was filled in this way.
     Every copy counts, including copies being replaced, as they really ran."""
-    times = sorted({when for points in copies.values() for when, _ in points})
+    times, _, total, filled, present = filled_in_total(copies)
     if not times:
         return [None] * len(percentiles), None
-    seconds = np.array([(when - times[0]).total_seconds() for when in times])
-    total = np.zeros(len(times))
-    present = filled = 0
-    for points in copies.values():
-        own = np.array([(when - times[0]).total_seconds() for when, _ in points])
-        inside = (seconds >= own[0]) & (seconds <= own[-1])
-        total[inside] += np.interp(seconds[inside], own, [value for _, value in points])
-        present += len(points)
-        filled += int(inside.sum()) - len(points)
     series = list(zip(times, total))
     values = [value for _, value in rolling_average(series, smooth_minutes)] if smooth_minutes else list(total)
     results = [np.percentile(values, p) if values else None for p in percentiles]

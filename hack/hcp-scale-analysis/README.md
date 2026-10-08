@@ -80,8 +80,11 @@ the numbers don't change.
 ## Known limitations
 
 - Each size has only one test run, so how much the numbers vary between runs is unknown.
-- The 3- and 6-node dumps are missing about a quarter of their CPU readings. Their CPU numbers, especially
-  peaks, are less reliable, and their total-CPU graphs read low, as missing readings add nothing to the total.
+- The 3- and 6-node dumps are missing about a quarter of their CPU readings, so their CPU numbers, especially
+  peaks, are less reliable. As a missing reading adds nothing to a recorded total, their graphs mark each moment
+  whose total is more than 5% too low and add a dashed estimate with the missing readings filled in, and each
+  run's `summary.json` says how many readings are missing. A missing reading at the very start or end of a
+  copy's readings can't be filled in, so it isn't marked.
 - The CPU metric drops readings of exactly zero, so idle containers show fewer readings.
 - Churn phases of 20–23 minutes give few 5-minute averages, so their CPU p95 is close to the highest value.
 - The runs weren't set up the same way: kube-burner and OpenShift versions, churn delay and actual churn length

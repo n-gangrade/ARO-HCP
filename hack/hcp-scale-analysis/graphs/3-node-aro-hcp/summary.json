@@ -34,13 +34,23 @@
     "last_sample": "2026-03-03T17:38:56.910000+00:00",
     "samples": 49,
     "interval_seconds": 30.0,
-    "gaps": []
+    "gaps": [],
+    "missing_readings": {
+      "share_of_readings_missing": 0.233,
+      "moments_more_than_5_percent_low": 38,
+      "lowest_moment_low_by": 0.755
+    }
   },
   "memory": {
     "first_sample": "2026-03-03T17:15:00.302000+00:00",
     "last_sample": "2026-03-03T17:38:56.910000+00:00",
     "samples": 49,
     "interval_seconds": 30.0,
-    "gaps": []
+    "gaps": [],
+    "missing_readings": {
+      "share_of_readings_missing": 0.0,
+      "moments_more_than_5_percent_low": 0,
+      "lowest_moment_low_by": 0.0
+    }
   }
 }
