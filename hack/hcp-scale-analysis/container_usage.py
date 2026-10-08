@@ -20,7 +20,8 @@ and container.
 Adding up: copies x average-copy p50, summed over every container, closely matches the
 cluster's typical total use. Higher percentiles don't add up like that: containers don't peak
 at the same moment, so summing p95s overstates the cluster's p95, and summing copies x busiest
-copy (what reservations sized for the busiest copy add up to) overstates it further.
+copy (what reservations sized for the busiest copy add up to) overstates it further. For the
+cluster's real total, see total_usage(), which combine_usage.py records for each run.
 
 With --container NAME it instead lists every copy of that one container, including copies
 being replaced, grouped by component and busiest first by the first percentile shown.
@@ -244,6 +245,33 @@ def window_copies(readings, cluster_id, start, end, scale):
             if points:
                 copies[key] = points
     return copies
+
+
+def total_usage(copies, smooth_minutes, percentiles):
+    """([percentiles], share filled in) of the whole control plane's total over the window: the sum
+    of every copy's reading at each moment, then for CPU averaged over smooth_minutes like each copy.
+
+    Unlike adding up per-container percentiles, this is the cluster's real p95, as it accounts for
+    containers peaking at different moments. A copy's missing readings between its first and last
+    reading are filled in along a straight line between its neighboring readings, so they don't
+    count as zero; the share filled in is the part of the summed readings that was filled in this way.
+    Every copy counts, including copies being replaced, as they really ran."""
+    times = sorted({when for points in copies.values() for when, _ in points})
+    if not times:
+        return [None] * len(percentiles), None
+    seconds = np.array([(when - times[0]).total_seconds() for when in times])
+    total = np.zeros(len(times))
+    present = filled = 0
+    for points in copies.values():
+        own = np.array([(when - times[0]).total_seconds() for when, _ in points])
+        inside = (seconds >= own[0]) & (seconds <= own[-1])
+        total[inside] += np.interp(seconds[inside], own, [value for _, value in points])
+        present += len(points)
+        filled += int(inside.sum()) - len(points)
+    series = list(zip(times, total))
+    values = [value for _, value in rolling_average(series, smooth_minutes)] if smooth_minutes else list(total)
+    results = [np.percentile(values, p) if values else None for p in percentiles]
+    return results, filled / (present + filled)
 
 
 def steady_windows(job, reading_span, cluster_id):

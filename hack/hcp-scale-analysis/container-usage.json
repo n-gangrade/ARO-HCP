@@ -14,6 +14,7 @@
     "notes": "why, from the hand-written notes file",
     "memory_gib": "memory working set in GiB; percentiles are of the readings as recorded",
     "cpu_cores": "CPU in cores; percentiles are of 5-minute averages, so p50 is close to the sustained average use",
+    "total": "the whole control plane's actual total over the window: p50 and p95 of the sum of every container's readings at each moment (for CPU, of 5-minute averages of that sum). Use this for the cluster's p95, rather than adding up containers' p95s. filled_in is the share of the summed readings that were missing and filled in along a straight line from the copy's neighboring readings",
     "copies": "how many copies (pods) count: those with readings for at least half the window, which leaves out copies being replaced; it can differ between memory and CPU",
     "busiest_copy": "the highest p50 and the highest p95 among the copies, each taken separately, so they can come from different copies; every copy reserves the same, so this is what a reservation has to fit",
     "average_copy": "the p50 and p95 averaged over the copies; copies x p50, added up over all containers, closely matches the cluster's typical total use. p95s don't add up like that: containers don't peak at the same moment, so the sum overstates the cluster's p95",
@@ -45,6 +46,18 @@
       "readings_present": {
         "memory_gib": 1.0,
         "cpu_cores": 0.743
+      },
+      "total": {
+        "memory_gib": {
+          "p50": 9.364,
+          "p95": 9.5,
+          "filled_in": 0.0
+        },
+        "cpu_cores": {
+          "p50": 0.761,
+          "p95": 0.789,
+          "filled_in": 0.249
+        }
       },
       "containers": [
         {"component": "azure-cloud-controller-manager", "container": "cloud-controller-manager", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.031, "p95": 0.031}, "average_copy": {"p50": 0.031, "p95": 0.031}, "readings_present": 1.0}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.001, "p95": 0.001}, "average_copy": {"p50": 0.001, "p95": 0.001}, "readings_present": 0.786, "raw_peak": 0.002}},
@@ -159,6 +172,18 @@
         "memory_gib": 0.975,
         "cpu_cores": 0.723
       },
+      "total": {
+        "memory_gib": {
+          "p50": 10.277,
+          "p95": 10.377,
+          "filled_in": 0.025
+        },
+        "cpu_cores": {
+          "p50": 1.161,
+          "p95": 1.368,
+          "filled_in": 0.277
+        }
+      },
       "containers": [
         {"component": "azure-cloud-controller-manager", "container": "cloud-controller-manager", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.037, "p95": 0.037}, "average_copy": {"p50": 0.037, "p95": 0.037}, "readings_present": 0.953}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.002, "p95": 0.002}, "average_copy": {"p50": 0.002, "p95": 0.002}, "readings_present": 0.698, "raw_peak": 0.004}},
         {"component": "azure-disk-csi-driver-controller", "container": "attacher-kube-rbac-proxy", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.011, "p95": 0.011}, "average_copy": {"p50": 0.011, "p95": 0.011}, "readings_present": 0.977}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.0, "p95": 0.0}, "average_copy": {"p50": 0.0, "p95": 0.0}, "readings_present": 0.698, "raw_peak": 0.0}},
@@ -271,6 +296,18 @@
       "readings_present": {
         "memory_gib": 1.0,
         "cpu_cores": 0.998
+      },
+      "total": {
+        "memory_gib": {
+          "p50": 13.44,
+          "p95": 13.843,
+          "filled_in": 0.0
+        },
+        "cpu_cores": {
+          "p50": 1.779,
+          "p95": 1.924,
+          "filled_in": 0.001
+        }
       },
       "containers": [
         {"component": "azure-cloud-controller-manager", "container": "cloud-controller-manager", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.049, "p95": 0.049}, "average_copy": {"p50": 0.049, "p95": 0.049}, "readings_present": 1.0}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.002, "p95": 0.003}, "average_copy": {"p50": 0.002, "p95": 0.003}, "readings_present": 1.0, "raw_peak": 0.005}},
@@ -385,6 +422,18 @@
         "memory_gib": 1.0,
         "cpu_cores": 0.999
       },
+      "total": {
+        "memory_gib": {
+          "p50": 11.437,
+          "p95": 11.637,
+          "filled_in": 0.0
+        },
+        "cpu_cores": {
+          "p50": 1.649,
+          "p95": 1.911,
+          "filled_in": 0.001
+        }
+      },
       "containers": [
         {"component": "azure-cloud-controller-manager", "container": "cloud-controller-manager", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.048, "p95": 0.048}, "average_copy": {"p50": 0.048, "p95": 0.048}, "readings_present": 1.0}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.002, "p95": 0.003}, "average_copy": {"p50": 0.002, "p95": 0.003}, "readings_present": 1.0, "raw_peak": 0.005}},
         {"component": "azure-disk-csi-driver-controller", "container": "attacher-kube-rbac-proxy", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.011, "p95": 0.011}, "average_copy": {"p50": 0.011, "p95": 0.011}, "readings_present": 1.0}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.0, "p95": 0.0}, "average_copy": {"p50": 0.0, "p95": 0.0}, "readings_present": 1.0, "raw_peak": 0.0}},
@@ -498,6 +547,18 @@
         "memory_gib": 1.0,
         "cpu_cores": 0.999
       },
+      "total": {
+        "memory_gib": {
+          "p50": 16.6,
+          "p95": 17.219,
+          "filled_in": 0.0
+        },
+        "cpu_cores": {
+          "p50": 2.142,
+          "p95": 2.452,
+          "filled_in": 0.001
+        }
+      },
       "containers": [
         {"component": "azure-cloud-controller-manager", "container": "cloud-controller-manager", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.063, "p95": 0.066}, "average_copy": {"p50": 0.063, "p95": 0.066}, "readings_present": 1.0}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.004, "p95": 0.004}, "average_copy": {"p50": 0.004, "p95": 0.004}, "readings_present": 1.0, "raw_peak": 0.01}},
         {"component": "azure-disk-csi-driver-controller", "container": "attacher-kube-rbac-proxy", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.011, "p95": 0.011}, "average_copy": {"p50": 0.011, "p95": 0.011}, "readings_present": 1.0}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.0, "p95": 0.0}, "average_copy": {"p50": 0.0, "p95": 0.0}, "readings_present": 1.0, "raw_peak": 0.0}},
@@ -610,6 +671,18 @@
       "readings_present": {
         "memory_gib": 1.0,
         "cpu_cores": 0.997
+      },
+      "total": {
+        "memory_gib": {
+          "p50": 27.958,
+          "p95": 28.457,
+          "filled_in": 0.0
+        },
+        "cpu_cores": {
+          "p50": 5.022,
+          "p95": 5.26,
+          "filled_in": 0.003
+        }
       },
       "containers": [
         {"component": "azure-cloud-controller-manager", "container": "cloud-controller-manager", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.091, "p95": 0.092}, "average_copy": {"p50": 0.091, "p95": 0.092}, "readings_present": 1.0}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.008, "p95": 0.009}, "average_copy": {"p50": 0.008, "p95": 0.009}, "readings_present": 1.0, "raw_peak": 0.02}},
@@ -729,6 +802,18 @@
         "memory_gib": 1.0,
         "cpu_cores": 0.999
       },
+      "total": {
+        "memory_gib": {
+          "p50": 24.199,
+          "p95": 25.163,
+          "filled_in": 0.0
+        },
+        "cpu_cores": {
+          "p50": 1.419,
+          "p95": 2.71,
+          "filled_in": 0.001
+        }
+      },
       "containers": [
         {"component": "azure-cloud-controller-manager", "container": "cloud-controller-manager", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.092, "p95": 0.095}, "average_copy": {"p50": 0.092, "p95": 0.095}, "readings_present": 1.0}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.003, "p95": 0.004}, "average_copy": {"p50": 0.003, "p95": 0.004}, "readings_present": 1.0, "raw_peak": 0.008}},
         {"component": "azure-disk-csi-driver-controller", "container": "attacher-kube-rbac-proxy", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.011, "p95": 0.011}, "average_copy": {"p50": 0.011, "p95": 0.011}, "readings_present": 1.0}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.0, "p95": 0.0}, "average_copy": {"p50": 0.0, "p95": 0.0}, "readings_present": 1.0, "raw_peak": 0.0}},
@@ -840,6 +925,18 @@
       "readings_present": {
         "memory_gib": 1.0,
         "cpu_cores": 0.999
+      },
+      "total": {
+        "memory_gib": {
+          "p50": 37.925,
+          "p95": 39.914,
+          "filled_in": 0.0
+        },
+        "cpu_cores": {
+          "p50": 2.279,
+          "p95": 5.203,
+          "filled_in": 0.001
+        }
       },
       "containers": [
         {"component": "azure-cloud-controller-manager", "container": "cloud-controller-manager", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.144, "p95": 0.148}, "average_copy": {"p50": 0.144, "p95": 0.148}, "readings_present": 1.0}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.004, "p95": 0.007}, "average_copy": {"p50": 0.004, "p95": 0.007}, "readings_present": 1.0, "raw_peak": 0.011}},
@@ -953,6 +1050,18 @@
         "memory_gib": 1.0,
         "cpu_cores": 0.998
       },
+      "total": {
+        "memory_gib": {
+          "p50": 72.946,
+          "p95": 73.482,
+          "filled_in": 0.0
+        },
+        "cpu_cores": {
+          "p50": 5.923,
+          "p95": 9.263,
+          "filled_in": 0.002
+        }
+      },
       "containers": [
         {"component": "azure-cloud-controller-manager", "container": "cloud-controller-manager", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.252, "p95": 0.252}, "average_copy": {"p50": 0.252, "p95": 0.252}, "readings_present": 1.0}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.008, "p95": 0.01}, "average_copy": {"p50": 0.008, "p95": 0.01}, "readings_present": 1.0, "raw_peak": 0.015}},
         {"component": "azure-disk-csi-driver-controller", "container": "attacher-kube-rbac-proxy", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.011, "p95": 0.011}, "average_copy": {"p50": 0.011, "p95": 0.011}, "readings_present": 1.0}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.0, "p95": 0.0}, "average_copy": {"p50": 0.0, "p95": 0.0}, "readings_present": 1.0, "raw_peak": 0.0}},
@@ -1064,6 +1173,18 @@
       "readings_present": {
         "memory_gib": 1.0,
         "cpu_cores": 0.998
+      },
+      "total": {
+        "memory_gib": {
+          "p50": 125.845,
+          "p95": 126.911,
+          "filled_in": 0.0
+        },
+        "cpu_cores": {
+          "p50": 18.087,
+          "p95": 22.25,
+          "filled_in": 0.002
+        }
       },
       "containers": [
         {"component": "azure-cloud-controller-manager", "container": "cloud-controller-manager", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.448, "p95": 0.449}, "average_copy": {"p50": 0.448, "p95": 0.449}, "readings_present": 1.0}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.015, "p95": 0.018}, "average_copy": {"p50": 0.015, "p95": 0.018}, "readings_present": 1.0, "raw_peak": 0.034}},

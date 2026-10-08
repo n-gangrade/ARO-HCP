@@ -61,17 +61,21 @@ the numbers don't change.
 5. For each copy, take the median (p50, typical) and p95 (busy moments).
 6. Combine a container's copies two ways: the busiest copy (the highest value among the copies, for each
    percentile separately) and the average copy.
+7. For each run, also add up every copy at each moment to get the whole control plane's total, and take its
+   p50 and p95. Each copy's missing readings are filled in along a straight line from its neighboring
+   readings, so they don't count as zero.
 
 ## Using the numbers
 
-- **Typical total use of a cluster:** add up copies x `average_copy.p50` over all containers. This closely
-  matches the median of the cluster's total (within 1% for memory and about 3% for CPU, except the 3- and
-  6-node CPU).
+- **A cluster's total use:** use the run's `total`, the p50 (typical) and p95 (busy moments) of the whole
+  control plane's actual total. Adding up copies x `average_copy.p50` over all containers gives about the same
+  typical total, but don't add up p95s: containers don't peak at the same moment, so the sum overstates the
+  cluster's p95, by about 27% for CPU at 250 nodes.
 - **Reservations:** every copy of a container gets the same request, so a request has to fit `busiest_copy`.
-- **Don't add up p95s** to get a cluster's p95. Containers don't peak at the same moment, so the sum
-  overstates it, by about 27% for CPU at 250 nodes.
 - **CPU p50** comes from 5-minute averages, so it's close to the sustained average use, not the median of the
   raw readings.
+- **Filled-in readings:** `total.filled_in` says how much of a total was filled in. It's about a quarter for the
+  3- and 6-node CPU and almost nothing elsewhere.
 
 ## Known limitations
 

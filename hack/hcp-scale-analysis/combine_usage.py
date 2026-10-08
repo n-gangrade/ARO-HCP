@@ -8,10 +8,12 @@ by default. That file is the input for comparing sizes and for the PM page: reru
 whenever new test runs arrive.
 
 For each run: its worker nodes, OpenShift version, date, whether it had a churn phase, the
-window used for memory and for CPU, and the share of expected readings that exist. For each
-container, separately for memory (GiB) and CPU (cores): how many copies count, the p50 and
-p95 of its busiest copy and of its average copy, and the share of expected readings that
-exist, plus the CPU raw peak. The file is meant to be committed, so it leaves out cluster IDs.
+window used for memory and for CPU, the share of expected readings that exist, and the whole
+control plane's total (p50 and p95 of the sum of every container at each moment, with each
+copy's missing readings filled in from its neighbors). For each container, separately for
+memory (GiB) and CPU (cores): how many copies count, the p50 and p95 of its busiest copy and
+of its average copy, and the share of expected readings that exist, plus the CPU raw peak.
+The file is meant to be committed, so it leaves out cluster IDs.
 
 Each run also gets its trust note, copied from a hand-written notes file (run-notes.json next
 to this script by default): a trust level (good, caveats or low) and why. Runs without a note
@@ -30,7 +32,7 @@ import time
 from collections import defaultdict
 
 from container_usage import (MIN_COPY_SHARE, NO_CHURN_MEMORY_WINDOW, read_readings, steady_windows,
-                             summarize, window_copies)
+                             summarize, total_usage, window_copies)
 from plot_controlplane_usage import BYTES_TO_GIB, CPU_METRIC, CPU_TO_CORES, MEMORY_METRIC, SMOOTH_MINUTES
 
 PERCENTILES = [50.0, 95.0]
@@ -43,6 +45,10 @@ FIELDS = {
     "notes": "why, from the hand-written notes file",
     "memory_gib": "memory working set in GiB; percentiles are of the readings as recorded",
     "cpu_cores": "CPU in cores; percentiles are of 5-minute averages, so p50 is close to the sustained average use",
+    "total": "the whole control plane's actual total over the window: p50 and p95 of the sum of every "
+             "container's readings at each moment (for CPU, of 5-minute averages of that sum). Use this for the "
+             "cluster's p95, rather than adding up containers' p95s. filled_in is the share of the summed "
+             "readings that were missing and filled in along a straight line from the copy's neighboring readings",
     "copies": "how many copies (pods) count: those with readings for at least half the window, which leaves out "
               "copies being replaced; it can differ between memory and CPU",
     "busiest_copy": "the highest p50 and the highest p95 among the copies, each taken separately, so they can come "
@@ -122,16 +128,20 @@ def summarize_run(path):
         "churn_phase": windows[CPU_METRIC][0] == "churn phase",
         "windows": {},
         "readings_present": {},
+        "total": {},
     }
     containers = defaultdict(dict)
     for name, metric, scale, smooth_minutes in METRICS:
         description, start, end = windows[metric]
         run["windows"][name] = {"description": description, "start": start.isoformat(), "end": end.isoformat()}
-        rows = summarize(window_copies(readings[metric], cluster_id, start, end, scale),
-                         smooth_minutes, PERCENTILES)
+        copies_in_window = window_copies(readings[metric], cluster_id, start, end, scale)
+        rows = summarize(copies_in_window, smooth_minutes, PERCENTILES)
         counted = sum(copies for _, _, copies, *_ in rows)
         present = sum(share * copies for _, _, copies, _, _, share, _ in rows)
         run["readings_present"][name] = round(present / counted, DECIMALS) if counted else None
+        total, filled = total_usage(copies_in_window, smooth_minutes, PERCENTILES)
+        run["total"][name] = {**by_percentile(total),
+                              "filled_in": None if filled is None else round(filled, DECIMALS)}
         for component, container, copies, busiest, average, share, peak in rows:
             entry = {"copies": copies, "busiest_copy": by_percentile(busiest),
                      "average_copy": by_percentile(average), "readings_present": round(share, DECIMALS)}
