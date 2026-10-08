@@ -6,7 +6,8 @@ pod metrics of the hosted cluster under test (the namespace containing
 jobSummary.clusterName), adds up every container at each timestamp, and writes
 these files to graphs/<dump name>/ next to this script (or to --output DIR):
 
-  total-cpu.png     total control-plane CPU (cores) over time
+  total-cpu.png     total control-plane CPU (cores) over time, as recorded and averaged
+                    over 5 minutes (which hides bursts lasting only seconds)
   total-memory.png  total control-plane memory working set (GiB) over time
   summary.json      job settings, phase times, sampling interval, gaps and skipped duplicates
 
@@ -39,6 +40,7 @@ MEMORY_METRIC = "podMemory-Controlplane"  # container_memory_working_set_bytes
 CPU_TO_CORES = 1 / 100
 BYTES_TO_GIB = 1 / 1024 ** 3
 GAP_FACTOR = 1.5  # a step this many times the usual sampling interval means samples are missing
+SMOOTH_MINUTES = 5
 PHASE_COLORS = ["tab:orange", "tab:green"]
 GRAPHS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "graphs")
 
@@ -148,11 +150,22 @@ def job_phases(job):
     return [("job", start, end)]
 
 
-def plot_total(path, points, origin, interval, phases, title, ylabel, color):
-    fig, ax = plt.subplots(figsize=(12, 4.5))
-    for (name, start, end), shade in zip(phases, PHASE_COLORS):
-        ax.axvspan(minutes_since(origin, start), minutes_since(origin, end),
-                   color=shade, alpha=0.12, label=f"kube-burner {name} phase")
+def rolling_average(points, minutes):
+    """Centered moving average of [(time, value)]: each point becomes the mean of the readings
+    in the `minutes` around it, kept only where that whole window lies inside the run."""
+    half = dt.timedelta(minutes=minutes) / 2
+    first, last = points[0][0], points[-1][0]
+    averaged = []
+    for when, _ in points:
+        if when - half < first or when + half > last:
+            continue
+        window = [value for other, value in points if when - half <= other < when + half]
+        averaged.append((when, sum(window) / len(window)))
+    return averaged
+
+
+def line_points(points, origin, interval):
+    """Plot coordinates (minutes, value), with a break wherever samples are missing."""
     xs, ys = [], []
     for i, (when, value) in enumerate(points):
         if i and (when - points[i - 1][0]).total_seconds() > GAP_FACTOR * interval:
@@ -160,13 +173,29 @@ def plot_total(path, points, origin, interval, phases, title, ylabel, color):
             ys.append(float("nan"))  # break the line instead of drawing across missing samples
         xs.append(minutes_since(origin, when))
         ys.append(value)
-    ax.plot(xs, ys, color=color, lw=1.5, label="sum of all control-plane containers")
+    return xs, ys
+
+
+def plot_total(path, points, origin, interval, phases, title, ylabel, color, smooth_minutes=None):
+    fig, ax = plt.subplots(figsize=(12, 4.5))
+    for (name, start, end), shade in zip(phases, PHASE_COLORS):
+        ax.axvspan(minutes_since(origin, start), minutes_since(origin, end),
+                   color=shade, alpha=0.12, label=f"kube-burner {name} phase")
+    xs, ys = line_points(points, origin, interval)
+    if smooth_minutes:
+        ax.plot(xs, ys, color=color, lw=1.0, alpha=0.35,
+                label="sum of all control-plane containers, as recorded")
+        smooth_xs, smooth_ys = line_points(rolling_average(points, smooth_minutes), origin, interval)
+        ax.plot(smooth_xs, smooth_ys, color=color, lw=2.2, label=f"same, averaged over {smooth_minutes} minutes")
+    else:
+        ax.plot(xs, ys, color=color, lw=1.5, label="sum of all control-plane containers")
     ax.set_title(title, fontsize=11)
     ax.set_xlabel(f"minutes since first sample ({origin:%Y-%m-%d %H:%M:%S} UTC)")
     ax.set_ylabel(ylabel)
     ax.set_ylim(bottom=0)
     ax.grid(True, alpha=0.25)
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.15), ncol=3, frameon=False, fontsize=9)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.15), ncol=4 if smooth_minutes else 3,
+              frameon=False, fontsize=9)
     fig.savefig(path, dpi=130, bbox_inches="tight")
     plt.close(fig)
 
@@ -213,7 +242,8 @@ def main():
     cpu_interval, cpu_gaps = interval_and_gaps(cpu)
     memory_interval, memory_gaps = interval_and_gaps(memory)
     plot_total(os.path.join(output, "total-cpu.png"), cpu, origin, cpu_interval, phases,
-               f"{name}: total control-plane CPU\n{subtitle}", "CPU (cores)", "tab:blue")
+               f"{name}: total control-plane CPU\n{subtitle}", "CPU (cores)", "tab:blue",
+               smooth_minutes=SMOOTH_MINUTES)
     plot_total(os.path.join(output, "total-memory.png"), memory, origin, memory_interval, phases,
                f"{name}: total control-plane memory\n{subtitle}", "memory working set (GiB)", "tab:red")
 
