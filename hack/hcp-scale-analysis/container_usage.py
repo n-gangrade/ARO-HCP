@@ -158,8 +158,11 @@ def print_copies(copies, smooth_minutes, percentiles, digits):
                   + (f"  {peak:8.{digits}f}" if smooth_minutes else ""))
 
 
-def print_summary(copies, smooth_minutes, percentiles, digits, top):
-    """One row per component and container, with its busiest and average copy, biggest first."""
+def summarize(copies, smooth_minutes, percentiles):
+    """Combine copies into one row per component and container, biggest first by the busiest copy's
+    first percentile: (component, container, copies, busiest, average, readings_present, raw_peak),
+    where busiest and average hold one value per percentile. Copies with readings for less than
+    MIN_COPY_SHARE of the window, such as copies being replaced, are left out."""
     expected = len({when for points in copies.values() for when, _ in points})
     groups = defaultdict(list)
     for (_, pod, container), points in copies.items():
@@ -173,24 +176,44 @@ def print_summary(copies, smooth_minutes, percentiles, digits, top):
         average = [float(np.mean(values)) if values else None for values in by_percentile]
         present = sum(count for *_, count in stats) / (len(stats) * expected)
         peak = max(peak for _, _, peak, _ in stats)
-        rows.append((f"{component} / {container}", len(stats), busiest, average, present, peak))
-    rows.sort(key=lambda row: row[2][0] if row[2][0] is not None else float("-inf"), reverse=True)
+        rows.append((component, container, len(stats), busiest, average, present, peak))
+    rows.sort(key=lambda row: row[3][0] if row[3][0] is not None else float("-inf"), reverse=True)
+    return rows
+
+
+def print_summary(copies, smooth_minutes, percentiles, digits, top):
+    """One row per component and container, with its busiest and average copy, biggest first."""
+    rows = summarize(copies, smooth_minutes, percentiles)
     shown = rows[:top] if top else rows
 
     headers = [f"p{p:g}" for p in percentiles]
     columns = [max(6, len(h)) for h in headers]
     columns[-1] += max(0, len("busiest copy") - (sum(columns) + 2 * (len(columns) - 1)))
     group = sum(columns) + 2 * (len(columns) - 1)
-    width = max(len("component / container"), *(len(row[0]) for row in shown))
+    names = [f"{component} / {container}" for component, container, *_ in shown]
+    width = max([len("component / container")] + [len(name) for name in names])
     print(f"  {'':{width}}  {'':6}  {'busiest copy':^{group}}  {'average copy':^{group}}")
     print(f"  {'component / container':{width}}  copies"
           + "".join(f"  {h:>{c}}" for h, c in zip(headers * 2, columns * 2))
           + "  readings" + ("  raw peak" if smooth_minutes else ""))
-    for name, count, busiest, average, present, peak in shown:
+    for name, (_, _, count, busiest, average, present, peak) in zip(names, shown):
         print(f"  {name:{width}}  {count:6d}{cells(busiest, columns, digits)}{cells(average, columns, digits)}"
               f"  {present:8.0%}" + (f"  {peak:8.{digits}f}" if smooth_minutes else ""))
     if len(shown) < len(rows):
         print(f"  ... and {len(rows) - len(shown)} more")
+
+
+def window_copies(readings, cluster_id, start, end, scale):
+    """{(namespace, pod, container): [(time, value)]} for the tested cluster's copies, keeping only
+    the readings inside the window and converting them to GiB or cores with `scale`."""
+    copies = {}
+    for key, copy in readings.items():
+        if cluster_id in key[0]:
+            points = sorted((when, value * scale) for when, value in copy.items()
+                            if start <= when <= end + END_TOLERANCE)
+            if points:
+                copies[key] = points
+    return copies
 
 
 def steady_windows(job, reading_span, cluster_id):
@@ -241,13 +264,7 @@ def main():
         if not same_window:
             label += f", {description} {start:%H:%M:%S}-{end:%H:%M:%S} UTC"
         smooth_minutes = args.smooth if metric == CPU_METRIC else 0
-        copies = {}
-        for key, copy in readings[metric].items():
-            if cluster_id in key[0]:
-                points = sorted((when, value * scale) for when, value in copy.items()
-                                if start <= when <= end + END_TOLERANCE)
-                if points:
-                    copies[key] = points
+        copies = window_copies(readings[metric], cluster_id, start, end, scale)
         print(f"\n{label}")
         if not copies:
             print(f"  no readings for container {args.container!r}" if args.container else "  no readings")
