@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-"""Usage percentiles of control-plane containers during one kube-burner run's churn phase.
+"""Usage percentiles of control-plane containers during the steady part of one kube-burner run.
 
 Reads one raw kube-burner dump (.ndjson or .ndjson.gz) and keeps the CPU and memory
-readings of the hosted cluster under test during the kube-burner churn phase.
+readings of the hosted cluster under test during the run's steady window: the kube-burner
+churn phase. A run without one (the 500-node run) never settles, so memory uses its last
+10 minutes of readings, after memory levels off, and CPU uses the whole run, which is all
+create phase and so a conservative (high) estimate. Treat such a run as low confidence.
 
 By default it prints one row per container, for every container: how many copies (pods)
 it has, the chosen percentiles of its busiest copy and of its average copy (the mean
@@ -41,6 +44,7 @@ from plot_controlplane_usage import (BYTES_TO_GIB, CPU_METRIC, CPU_TO_CORES, MEM
 
 # The test takes its last reading a fraction of a second after the churn phase ends.
 END_TOLERANCE = dt.timedelta(seconds=1)
+NO_CHURN_MEMORY_WINDOW = dt.timedelta(minutes=10)
 MIN_COPY_SHARE = 0.5  # in the summary, a copy counts only with readings for this share of the window
 
 
@@ -87,10 +91,12 @@ def component_of(pod):
 
 
 def read_readings(path, container=None):
-    """Return (job_summary, readings), where readings[metric][(namespace, pod, container)]
-    maps each reading's time to its raw value, for every container or only `container`."""
+    """Return (job_summary, readings, reading_span), where readings[metric][(namespace, pod, container)]
+    maps each reading's time to its raw value, for every container or only `container`, and
+    reading_span[namespace] is the (first, last) time of that namespace's readings of any container."""
     job = None
     readings = {CPU_METRIC: defaultdict(dict), MEMORY_METRIC: defaultdict(dict)}
+    reading_span = {}
     with opener(path) as f:
         for line in f:
             if '"jobSummary"' not in line and CPU_METRIC not in line and MEMORY_METRIC not in line:
@@ -107,11 +113,16 @@ def read_readings(path, container=None):
             labels = record.get("labels", {})
             name = labels.get("container", "")
             # "" and "POD" are pod sandbox (pause) cgroups, not workload containers.
-            if metric not in readings or name in ("", "POD") or (container and name != container):
+            if metric not in readings or name in ("", "POD"):
                 continue
-            copy = readings[metric][(labels.get("namespace", ""), labels.get("pod", ""), name)]
-            copy.setdefault(parse_time(record["timestamp"]), record["value"])
-    return job or {}, readings
+            namespace, when = labels.get("namespace", ""), parse_time(record["timestamp"])
+            first, last = reading_span.get(namespace, (when, when))
+            reading_span[namespace] = (min(first, when), max(last, when))
+            if container and name != container:
+                continue
+            copy = readings[metric][(namespace, labels.get("pod", ""), name)]
+            copy.setdefault(when, record["value"])
+    return job or {}, readings, reading_span
 
 
 def copy_stats(points, smooth_minutes, percentiles):
@@ -182,31 +193,59 @@ def print_summary(copies, smooth_minutes, percentiles, digits, top):
         print(f"  ... and {len(rows) - len(shown)} more")
 
 
+def steady_windows(job, reading_span, cluster_id):
+    """{metric: (description, start, end)}: the readings to use for each metric. That's the churn
+    phase, or for a run without one, the last NO_CHURN_MEMORY_WINDOW of readings for memory and
+    the whole run for CPU. None when there is nothing to go on."""
+    churn_start = parse_time(job.get("churnStartTimestamp"))
+    churn_end = parse_time(job.get("churnEndTimestamp"))
+    if churn_start and churn_end:
+        churn = ("churn phase", churn_start, churn_end)
+        return {MEMORY_METRIC: churn, CPU_METRIC: churn}
+    spans = [span for namespace, span in reading_span.items() if cluster_id in namespace]
+    if not spans:
+        return None
+    first, last = min(start for start, _ in spans), max(end for _, end in spans)
+    minutes = NO_CHURN_MEMORY_WINDOW.total_seconds() / 60
+    return {MEMORY_METRIC: (f"last {minutes:g} minutes", last - NO_CHURN_MEMORY_WINDOW, last),
+            CPU_METRIC: ("whole run", first, last)}
+
+
 def main():
     args = parse_args()
     dump = os.path.expanduser(args.dump)
-    job, readings = read_readings(dump, args.container)
+    job, readings, reading_span = read_readings(dump, args.container)
     cluster_id = job.get("clusterName")
-    churn_start = parse_time(job.get("churnStartTimestamp"))
-    churn_end = parse_time(job.get("churnEndTimestamp"))
-    if not (cluster_id and churn_start and churn_end):
-        sys.exit(f"{dump} has no churn phase; only runs with one are handled so far")
+    windows = steady_windows(job, reading_span, cluster_id) if cluster_id else None
+    if not windows:
+        sys.exit(f"no readings for the hosted cluster under test in {dump}")
+    same_window = windows[MEMORY_METRIC] == windows[CPU_METRIC]
 
     name = os.path.basename(dump).removesuffix(".gz").removesuffix(".ndjson")
     what = f"{args.container} container" if args.container else "all containers"
-    print(f"{name}: {what}, churn phase {churn_start:%H:%M:%S}-{churn_end:%H:%M:%S} UTC")
+    if same_window:
+        description, start, end = windows[CPU_METRIC]
+        print(f"{name}: {what}, {description} {start:%H:%M:%S}-{end:%H:%M:%S} UTC")
+    else:
+        print(f"{name}: {what}, no churn phase")
+        print("The run never settles, so memory uses its last part, after memory levels off, and CPU uses the "
+              "whole run, which is all create phase and so a conservative (high) estimate. "
+              "Treat both as low confidence.")
     if not args.container:
         print(f"Copies count only if they have readings for at least {MIN_COPY_SHARE:.0%} of the window.")
     cpu_label = (f"CPU (cores), percentiles of {args.smooth:g}-minute averages" if args.smooth
                  else "CPU (cores)")
     for metric, label, scale, digits in ((MEMORY_METRIC, "memory (GiB)", BYTES_TO_GIB, 2),
                                          (CPU_METRIC, cpu_label, CPU_TO_CORES, 3)):
+        description, start, end = windows[metric]
+        if not same_window:
+            label += f", {description} {start:%H:%M:%S}-{end:%H:%M:%S} UTC"
         smooth_minutes = args.smooth if metric == CPU_METRIC else 0
         copies = {}
         for key, copy in readings[metric].items():
             if cluster_id in key[0]:
                 points = sorted((when, value * scale) for when, value in copy.items()
-                                if churn_start <= when <= churn_end + END_TOLERANCE)
+                                if start <= when <= end + END_TOLERANCE)
                 if points:
                     copies[key] = points
         print(f"\n{label}")
