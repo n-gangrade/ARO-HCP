@@ -3,31 +3,41 @@
 
 Reads one raw kube-burner dump (.ndjson or .ndjson.gz) and keeps the CPU and memory
 readings of the hosted cluster under test during the run's steady window: the kube-burner
-churn phase. A run without one (the 500-node run) never settles, so memory uses its last
-10 minutes of readings, after memory levels off, and CPU uses the whole run, which is all
-create phase and so a conservative (high) estimate. Treat such a run as low confidence.
+churn phase. A run without one (the 500-node run) has no steady part, as its memory climbs
+until near the end. So memory uses its last 10 minutes of readings, once memory has leveled
+off, and CPU uses the whole run, which is all create phase and so a conservative (high)
+estimate. Treat such a run as low confidence.
 
 By default it prints one row per container, for every container: how many copies (pods)
 it has, the chosen percentiles of its busiest copy and of its average copy (the mean
-over its copies), and what share of the expected readings exist. Copies only count if
-they have readings for at least half the window, which leaves out copies being replaced.
-Different components can have containers with the same name (for example "manager"), so
-rows are per component and container.
+over its copies), and what share of the expected readings exist. The busiest copy is the
+highest value among the copies for each percentile separately, so its p50 and p95 can come
+from different copies. Copies only count if they have readings for at least half the window,
+which leaves out copies being replaced (from the readings share too). Different components
+can have containers with the same name (for example "manager"), so rows are per component
+and container.
+
+Adding up: copies x average-copy p50, summed over every container, closely matches the
+cluster's typical total use. Higher percentiles don't add up like that: containers don't peak
+at the same moment, so summing p95s overstates the cluster's p95, and summing copies x busiest
+copy (what reservations sized for the busiest copy add up to) overstates it further.
 
 With --container NAME it instead lists every copy of that one container, including copies
 being replaced, grouped by component and busiest first by the first percentile shown.
 
 Percentiles default to the median (p50, typical usage) and p95 (usage at busy moments).
 Memory percentiles use the readings as recorded. CPU readings are first averaged over
-5 minutes (see --smooth), which hides bursts lasting only seconds; the highest CPU
-reading as recorded is shown separately. Missing readings are skipped, never counted
-as zero. Repeated copies of the same reading, as in the 250- and 500-node dumps, are
-counted once.
+5 minutes (see --smooth), which hides bursts lasting only seconds, so CPU p50 is close to
+the sustained average rather than the median of the raw readings (which bursts don't move).
+The highest CPU reading as recorded is shown separately. Missing readings are skipped, never
+counted as zero. For CPU, a readings share below 100% can also mean an idle container, as the
+CPU metric drops readings of exactly zero. Repeated copies of the same reading, as in the
+250- and 500-node dumps, are counted once.
 
 Usage:
   python3 container_usage.py DUMP [--container NAME] [--percentiles P,P,...] [--smooth MINUTES] [--top N]
 
-Requires numpy, and matplotlib through plot_controlplane_usage.
+Requires Python 3.11 or newer, numpy, and matplotlib through plot_controlplane_usage.
 """
 import argparse
 import datetime as dt
@@ -42,7 +52,8 @@ from hcputil import opener
 from plot_controlplane_usage import (BYTES_TO_GIB, CPU_METRIC, CPU_TO_CORES, MEMORY_METRIC, SMOOTH_MINUTES,
                                      parse_time, rolling_average)
 
-# The test takes its last reading a fraction of a second after the churn phase ends.
+# The last reading usually lands a fraction of a second after the churn phase ends, so the window's
+# end is stretched by 1 s to include it. (In the 49-node run it lands 11 s later and is left out.)
 END_TOLERANCE = dt.timedelta(seconds=1)
 NO_CHURN_MEMORY_WINDOW = dt.timedelta(minutes=10)
 MIN_COPY_SHARE = 0.5  # in the summary, a copy counts only with readings for this share of the window
@@ -272,9 +283,9 @@ def main():
         print(f"{name}: {what}, {description} {start:%H:%M:%S}-{end:%H:%M:%S} UTC")
     else:
         print(f"{name}: {what}, no churn phase")
-        print("The run never settles, so memory uses its last part, after memory levels off, and CPU uses the "
-              "whole run, which is all create phase and so a conservative (high) estimate. "
-              "Treat both as low confidence.")
+        print("The run has no steady churn phase and its memory climbs until near the end, so memory uses "
+              "its last part, once memory has leveled off, and CPU uses the whole run, which is all create "
+              "phase and so a conservative (high) estimate. Treat both as low confidence.")
     if not args.container:
         print(f"Copies count only if they have readings for at least {MIN_COPY_SHARE:.0%} of the window.")
     cpu_label = (f"CPU (cores), percentiles of {args.smooth:g}-minute averages" if args.smooth

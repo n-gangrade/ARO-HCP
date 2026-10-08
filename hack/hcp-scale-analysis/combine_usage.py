@@ -20,7 +20,7 @@ get a warning, as a reminder to look at a new run's graphs and write one.
 Usage:
   python3 combine_usage.py DUMP [DUMP ...] [--output FILE] [--notes FILE]
 
-Requires numpy, and matplotlib through plot_controlplane_usage.
+Requires Python 3.11 or newer, numpy, and matplotlib through plot_controlplane_usage.
 """
 import argparse
 import json
@@ -41,10 +41,18 @@ METRICS = [("memory_gib", MEMORY_METRIC, BYTES_TO_GIB, 0),
 FIELDS = {
     "trust": "how much to trust the run, from the hand-written notes file: good, caveats or low",
     "notes": "why, from the hand-written notes file",
-    "busiest_copy": "the highest p50 and p95 among the container's copies; every copy reserves the same, "
-                    "so this is what a reservation has to fit",
-    "average_copy": "the p50 and p95 averaged over the container's copies; times copies, what it actually uses",
-    "readings_present": "share of the expected readings that exist; below 1 means missing data",
+    "memory_gib": "memory working set in GiB; percentiles are of the readings as recorded",
+    "cpu_cores": "CPU in cores; percentiles are of 5-minute averages, so p50 is close to the sustained average use",
+    "copies": "how many copies (pods) count: those with readings for at least half the window, which leaves out "
+              "copies being replaced; it can differ between memory and CPU",
+    "busiest_copy": "the highest p50 and the highest p95 among the copies, each taken separately, so they can come "
+                    "from different copies; every copy reserves the same, so this is what a reservation has to fit",
+    "average_copy": "the p50 and p95 averaged over the copies; copies x p50, added up over all containers, closely "
+                    "matches the cluster's typical total use. p95s don't add up like that: containers don't peak at "
+                    "the same moment, so the sum overstates the cluster's p95",
+    "readings_present": "share of the expected readings that exist, over the copies that count (for a run, over all "
+                        "its containers); below 1 means missing data or, for CPU, an idle container, as the CPU "
+                        "metric drops readings of exactly zero",
     "raw_peak": "highest single CPU reading of any copy, before averaging",
 }
 TRUST_LEVELS = ("good", "caveats", "low")

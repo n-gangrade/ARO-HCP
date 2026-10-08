@@ -19,7 +19,7 @@ the cluster ID or namespace; those are only printed to the terminal.
 Usage:
   python3 plot_controlplane_usage.py DUMP [--output DIR]
 
-Requires matplotlib.
+Requires Python 3.11 or newer and matplotlib.
 """
 import argparse
 import datetime as dt
@@ -56,7 +56,8 @@ def parse_args():
 
 
 def parse_time(value):
-    """Parse a kube-burner timestamp; None when it is missing or Go's zero time."""
+    """Parse a kube-burner timestamp; None when it is missing or Go's zero time. Needs Python 3.11+,
+    which parses the 2- and 9-digit fractions of a second some of these timestamps have."""
     if not value or value.startswith("0001-"):
         return None
     return dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
