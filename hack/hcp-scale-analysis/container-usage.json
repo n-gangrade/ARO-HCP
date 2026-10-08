@@ -10,15 +10,20 @@
     "no_churn_memory_window_minutes": 10.0
   },
   "fields": {
+    "trust": "how much to trust the run, from the hand-written notes file: good, caveats or low",
+    "notes": "why, from the hand-written notes file",
     "busiest_copy": "the highest p50 and p95 among the container's copies; every copy reserves the same, so this is what a reservation has to fit",
     "average_copy": "the p50 and p95 averaged over the container's copies; times copies, what it actually uses",
     "readings_present": "share of the expected readings that exist; below 1 means missing data",
     "raw_peak": "highest single CPU reading of any copy, before averaging"
   },
+  "notes_for_all_runs": "Each size has only one test run, so how much its numbers would vary between runs is unknown.",
   "runs": [
     {
       "run": "3-node-aro-hcp",
       "worker_nodes": 3,
+      "trust": "caveats",
+      "notes": "Memory is complete, but only 74% of CPU readings exist, so its CPU numbers, especially peaks, are less reliable. Runs a newer OpenShift (4.20) than most runs (4.19).",
       "ocp_version": "4.20.8",
       "date": "2026-03-03",
       "churn_phase": true,
@@ -130,6 +135,8 @@
     {
       "run": "6-node-aro-hcp",
       "worker_nodes": 6,
+      "trust": "caveats",
+      "notes": "Only 72% of CPU readings exist and a few memory readings are missing, so its CPU numbers, especially peaks, are less reliable. Runs a newer OpenShift (4.20) than most runs (4.19).",
       "ocp_version": "4.20.8",
       "date": "2026-03-03",
       "churn_phase": true,
@@ -241,6 +248,8 @@
     {
       "run": "12-nodes-100-client-qps-rate-aro-hcp",
       "worker_nodes": 12,
+      "trust": "good",
+      "notes": "Complete data. Uses about 2 GiB more memory than the other 12-node run, mostly kube-apiserver.",
       "ocp_version": "4.19.7",
       "date": "2025-11-24",
       "churn_phase": true,
@@ -352,6 +361,8 @@
     {
       "run": "12-nodes-20-client-qps-rate-aro-hcp",
       "worker_nodes": 12,
+      "trust": "good",
+      "notes": "Complete data.",
       "ocp_version": "4.19.7",
       "date": "2025-11-14",
       "churn_phase": true,
@@ -463,6 +474,8 @@
     {
       "run": "30-node-aro-hcp",
       "worker_nodes": 30,
+      "trust": "good",
+      "notes": "Complete data.",
       "ocp_version": "4.19.7",
       "date": "2025-10-10",
       "churn_phase": true,
@@ -574,6 +587,8 @@
     {
       "run": "49-node-hcp-raw",
       "worker_nodes": 49,
+      "trust": "caveats",
+      "notes": "Complete data, but a different setup from the other runs: a newer OpenShift (4.22, most runs are 4.19) and the only run with a router. Uses more memory than the 60-node run.",
       "ocp_version": "4.22.8",
       "date": "2026-08-14",
       "churn_phase": true,
@@ -690,6 +705,8 @@
     {
       "run": "60-node-aro-hcp",
       "worker_nodes": 60,
+      "trust": "good",
+      "notes": "Complete data.",
       "ocp_version": "4.19.7",
       "date": "2025-10-15",
       "churn_phase": true,
@@ -800,6 +817,8 @@
     {
       "run": "120-node-aro-hcp",
       "worker_nodes": 120,
+      "trust": "good",
+      "notes": "Complete data.",
       "ocp_version": "4.19.7",
       "date": "2025-10-20",
       "churn_phase": true,
@@ -910,6 +929,8 @@
     {
       "run": "250-node-aro-hcp",
       "worker_nodes": 250,
+      "trust": "good",
+      "notes": "Complete once its duplicate records are removed, which the scripts do.",
       "ocp_version": "4.19.7",
       "date": "2025-10-23",
       "churn_phase": true,
@@ -1020,6 +1041,8 @@
     {
       "run": "500-node-aro-hcp",
       "worker_nodes": 498,
+      "trust": "low",
+      "notes": "No churn phase, so the run never settles: memory comes from its last 10 minutes and CPU from the whole run, as a conservative (high) estimate. Its duplicate records are removed by the scripts.",
       "ocp_version": "4.19.7",
       "date": "2025-10-30",
       "churn_phase": false,

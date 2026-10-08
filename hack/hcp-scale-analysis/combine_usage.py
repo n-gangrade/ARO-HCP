@@ -13,8 +13,12 @@ container, separately for memory (GiB) and CPU (cores): how many copies count, t
 p95 of its busiest copy and of its average copy, and the share of expected readings that
 exist, plus the CPU raw peak. The file is meant to be committed, so it leaves out cluster IDs.
 
+Each run also gets its trust note, copied from a hand-written notes file (run-notes.json next
+to this script by default): a trust level (good, caveats or low) and why. Runs without a note
+get a warning, as a reminder to look at a new run's graphs and write one.
+
 Usage:
-  python3 combine_usage.py DUMP [DUMP ...] [--output FILE]
+  python3 combine_usage.py DUMP [DUMP ...] [--output FILE] [--notes FILE]
 
 Requires numpy, and matplotlib through plot_controlplane_usage.
 """
@@ -35,13 +39,18 @@ DECIMALS = 3  # 0.001 GiB is about 1 MiB, and 0.001 cores is 1 millicore
 METRICS = [("memory_gib", MEMORY_METRIC, BYTES_TO_GIB, 0),
            ("cpu_cores", CPU_METRIC, CPU_TO_CORES, SMOOTH_MINUTES)]
 FIELDS = {
+    "trust": "how much to trust the run, from the hand-written notes file: good, caveats or low",
+    "notes": "why, from the hand-written notes file",
     "busiest_copy": "the highest p50 and p95 among the container's copies; every copy reserves the same, "
                     "so this is what a reservation has to fit",
     "average_copy": "the p50 and p95 averaged over the container's copies; times copies, what it actually uses",
     "readings_present": "share of the expected readings that exist; below 1 means missing data",
     "raw_peak": "highest single CPU reading of any copy, before averaging",
 }
-DEFAULT_OUTPUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "container-usage.json")
+TRUST_LEVELS = ("good", "caveats", "low")
+HERE = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_OUTPUT = os.path.join(HERE, "container-usage.json")
+DEFAULT_NOTES = os.path.join(HERE, "run-notes.json")
 
 
 def parse_args():
@@ -50,7 +59,38 @@ def parse_args():
     parser.add_argument("dumps", nargs="+", metavar="DUMP", help="raw kube-burner dumps (.ndjson or .ndjson.gz)")
     parser.add_argument("--output", default=DEFAULT_OUTPUT,
                         help="JSON file to write (default: container-usage.json next to this script)")
+    parser.add_argument("--notes", default=DEFAULT_NOTES,
+                        help="hand-written trust notes (default: run-notes.json next to this script)")
     return parser.parse_args()
+
+
+def load_notes(path):
+    """(the note for all runs, {run name: {"trust": ..., "notes": ...}}) from the notes file."""
+    if not os.path.exists(path):
+        print(f"warning: there's no notes file at {path}, so no run gets a trust note", file=sys.stderr)
+        return None, {}
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except ValueError as error:
+        sys.exit(f"couldn't read {path}: {error}")
+    notes = data.get("runs", {})
+    for run, note in notes.items():
+        if not isinstance(note, dict) or note.get("trust") not in TRUST_LEVELS:
+            sys.exit(f"{path}: the trust for {run} must be one of: {', '.join(TRUST_LEVELS)}")
+    return data.get("all_runs"), notes
+
+
+def with_note(run, notes):
+    """The run with its trust note, placed right after its name and size."""
+    note = notes.get(run["run"])
+    if note is None:
+        print(f"warning: {run['run']} has no trust note; look at its graphs and add one to the notes file",
+              file=sys.stderr)
+        note = {}
+    head = {key: run[key] for key in ("run", "worker_nodes")}
+    rest = {key: value for key, value in run.items() if key not in head}
+    return {**head, "trust": note.get("trust"), "notes": note.get("notes"), **rest}
 
 
 def by_percentile(values):
@@ -112,13 +152,16 @@ def to_json(data):
 
 def main():
     args = parse_args()
+    all_runs_note, notes = load_notes(os.path.expanduser(args.notes))
     runs = []
     for path in args.dumps:
         started = time.monotonic()
         run = summarize_run(os.path.expanduser(path))
         print(f"{run['run']}: {len(run['containers'])} containers ({time.monotonic() - started:.0f} s)",
               file=sys.stderr)
-        runs.append(run)
+        runs.append(with_note(run, notes))
+    for name in sorted(set(notes) - {run["run"] for run in runs}):
+        print(f"note: {name} has a trust note but wasn't one of the runs given", file=sys.stderr)
     runs.sort(key=lambda run: (run["worker_nodes"] or 0, run["run"]))
     data = {
         "description": "Per-container control-plane usage of each kube-burner run, written by combine_usage.py",
@@ -129,6 +172,7 @@ def main():
             "no_churn_memory_window_minutes": NO_CHURN_MEMORY_WINDOW.total_seconds() / 60,
         },
         "fields": FIELDS,
+        "notes_for_all_runs": all_runs_note,
         "runs": runs,
     }
     output = os.path.expanduser(args.output)
