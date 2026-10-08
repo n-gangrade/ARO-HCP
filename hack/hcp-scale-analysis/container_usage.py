@@ -15,7 +15,7 @@ Different components can have containers with the same name (for example "manage
 rows are per component and container.
 
 With --container NAME it instead lists every copy of that one container, including copies
-being replaced, busiest first by median and grouped by component.
+being replaced, grouped by component and busiest first by the first percentile shown.
 
 Percentiles default to the median (p50, typical usage) and p95 (usage at busy moments).
 Memory percentiles use the readings as recorded. CPU readings are first averaged over
@@ -83,11 +83,24 @@ def parse_args():
     return args
 
 
+# Kubernetes builds a Deployment pod's name from its ReplicaSet's hash and 5 random characters,
+# both from this alphabet (k8s.io/apimachinery/pkg/util/rand). It includes digits, so the random
+# part can be all digits, like a StatefulSet's number.
+KUBERNETES_NAME_CHARACTERS = frozenset("bcdfghjklmnpqrstvwxz2456789")
+
+
 def component_of(pod):
-    """The component a pod is a copy of: its name without the suffix Kubernetes adds,
-    e.g. etcd-0 -> etcd and kube-apiserver-66f85f7774-kjd5q -> kube-apiserver."""
+    """The component a pod is a copy of: its name without the suffix Kubernetes adds. Deployment
+    pods end in a hash and 5 random characters (kube-apiserver-66f85f7774-kjd5q -> kube-apiserver);
+    StatefulSet pods end in a number (etcd-0 -> etcd)."""
     parts = pod.split("-")
-    return "-".join(parts[:-1]) if parts[-1].isdigit() else "-".join(parts[:-2])
+    random_part, hash_part = parts[-1], parts[-2] if len(parts) >= 3 else ""
+    if (len(random_part) == 5 and 6 <= len(hash_part) <= 10
+            and set(random_part + hash_part) <= KUBERNETES_NAME_CHARACTERS):
+        return "-".join(parts[:-2])
+    if random_part.isdigit():
+        return "-".join(parts[:-1])
+    return "-".join(parts[:-2])
 
 
 def read_readings(path, container=None):
@@ -126,13 +139,13 @@ def read_readings(path, container=None):
 
 
 def copy_stats(points, smooth_minutes, percentiles):
-    """(median reading, [percentiles], highest reading, number of readings) for one copy's
-    [(time, value)]; with smooth_minutes, the percentiles come from averages over that long."""
+    """([percentiles], highest reading, number of readings) for one copy's [(time, value)];
+    with smooth_minutes, the percentiles come from averages over that long."""
     raw = [value for _, value in points]
     values = [value for _, value in rolling_average(points, smooth_minutes)] if smooth_minutes else raw
     # A copy present for less than one averaging window has no averages, so no percentiles.
     results = [np.percentile(values, p) if values else None for p in percentiles]
-    return np.median(raw), results, max(raw), len(raw)
+    return results, max(raw), len(raw)
 
 
 def cells(values, columns, digits):
@@ -140,20 +153,26 @@ def cells(values, columns, digits):
 
 
 def print_copies(copies, smooth_minutes, percentiles, digits):
-    """One row per copy of a single container, grouped by component, busiest first."""
+    """One row per copy of a single container, grouped by component, busiest first by the first
+    percentile shown (copies with no value for it last)."""
     headers = [f"p{p:g}" for p in percentiles]
     columns = [max(6, len(h)) for h in headers]
     rows = [(*copy_stats(points, smooth_minutes, percentiles), pod) for (_, pod, _), points in copies.items()]
     width = max(len(pod) for *_, pod in rows)
     print(f"  {'copy':{width}}  readings" + "".join(f"  {h:>{c}}" for h, c in zip(headers, columns))
           + ("  raw peak" if smooth_minutes else ""))
+
+    def first_shown(row):
+        return row[0][0] if row[0][0] is not None else float("-inf")
+
     components = defaultdict(list)
     for row in rows:
         components[component_of(row[-1])].append(row)
-    for component in sorted(components, key=lambda c: max(row[0] for row in components[c]), reverse=True):
+    for component in sorted(components, key=lambda c: max(first_shown(row) for row in components[c]),
+                            reverse=True):
         if len(components) > 1:
             print(f"  {component}:")
-        for _, results, peak, count, pod in sorted(components[component], key=lambda row: row[0], reverse=True):
+        for results, peak, count, pod in sorted(components[component], key=first_shown, reverse=True):
             print(f"  {pod:{width}}  {count:8d}{cells(results, columns, digits)}"
                   + (f"  {peak:8.{digits}f}" if smooth_minutes else ""))
 
@@ -170,12 +189,12 @@ def summarize(copies, smooth_minutes, percentiles):
             groups[(component_of(pod), container)].append(copy_stats(points, smooth_minutes, percentiles))
     rows = []
     for (component, container), stats in groups.items():
-        by_percentile = [[results[i] for _, results, _, _ in stats if results[i] is not None]
+        by_percentile = [[results[i] for results, _, _ in stats if results[i] is not None]
                          for i in range(len(percentiles))]
         busiest = [max(values) if values else None for values in by_percentile]
         average = [float(np.mean(values)) if values else None for values in by_percentile]
         present = sum(count for *_, count in stats) / (len(stats) * expected)
-        peak = max(peak for _, _, peak, _ in stats)
+        peak = max(peak for _, peak, _ in stats)
         rows.append((component, container, len(stats), busiest, average, present, peak))
     rows.sort(key=lambda row: row[3][0] if row[3][0] is not None else float("-inf"), reverse=True)
     return rows
@@ -239,7 +258,9 @@ def main():
     dump = os.path.expanduser(args.dump)
     job, readings, reading_span = read_readings(dump, args.container)
     cluster_id = job.get("clusterName")
-    windows = steady_windows(job, reading_span, cluster_id) if cluster_id else None
+    if not cluster_id:
+        sys.exit(f"{dump} has no jobSummary with a clusterName, so the hosted cluster under test is unknown")
+    windows = steady_windows(job, reading_span, cluster_id)
     if not windows:
         sys.exit(f"no readings for the hosted cluster under test in {dump}")
     same_window = windows[MEMORY_METRIC] == windows[CPU_METRIC]

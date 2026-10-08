@@ -101,7 +101,9 @@ def summarize_run(path):
     """The run's details and its per-container numbers, as stored in the file."""
     job, readings, reading_span = read_readings(path)
     cluster_id = job.get("clusterName")
-    windows = steady_windows(job, reading_span, cluster_id) if cluster_id else None
+    if not cluster_id:
+        sys.exit(f"{path} has no jobSummary with a clusterName, so the hosted cluster under test is unknown")
+    windows = steady_windows(job, reading_span, cluster_id)
     if not windows:
         sys.exit(f"no readings for the hosted cluster under test in {path}")
     run = {

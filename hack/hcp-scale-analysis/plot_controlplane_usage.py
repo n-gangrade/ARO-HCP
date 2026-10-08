@@ -75,7 +75,7 @@ def read_dump(path):
     """Read the dump once.
 
     Returns (job_summary, usage, containers, duplicates), where
-    usage[namespace][metric][timestamp] is the sum over that namespace's containers,
+    usage[namespace][metric][time] is the sum over that namespace's containers,
     containers[namespace] holds the (pod, container) pairs seen and duplicates[namespace]
     counts repeated samples that were skipped.
     """
@@ -106,13 +106,15 @@ def read_dump(path):
                 continue
             namespace = labels.get("namespace", "")
             pod = labels.get("pod", "")
-            key = (metric, namespace, pod, container, record["timestamp"])
+            # Keyed by the parsed time, so the same instant written two ways (…:00Z, …:00.000Z) is one sample.
+            when = parse_time(record["timestamp"])
+            key = (metric, namespace, pod, container, when)
             # Some dumps (e.g. the 250- and 500-node runs) index the same samples twice.
             if key in seen:
                 duplicates[namespace] += 1
                 continue
             seen.add(key)
-            usage[namespace][metric][record["timestamp"]] += record["value"]
+            usage[namespace][metric][when] += record["value"]
             containers[namespace].add((pod, container))
     return job or {}, usage, containers, duplicates
 
@@ -121,9 +123,9 @@ def total_series(usage, namespaces, metric, scale):
     """[(time, total)] in time order, summed over every container in the namespaces."""
     totals = defaultdict(float)
     for namespace in namespaces:
-        for timestamp, value in usage[namespace][metric].items():
-            totals[timestamp] += value
-    return sorted((parse_time(timestamp), value * scale) for timestamp, value in totals.items())
+        for when, value in usage[namespace][metric].items():
+            totals[when] += value
+    return sorted((when, value * scale) for when, value in totals.items())
 
 
 def interval_and_gaps(points):
@@ -219,7 +221,9 @@ def main():
 
     job, usage, containers, duplicates = read_dump(dump)
     cluster_id = job.get("clusterName")
-    namespaces = sorted(ns for ns in usage if not cluster_id or cluster_id in ns)
+    if not cluster_id:
+        sys.exit(f"{dump} has no jobSummary with a clusterName, so the hosted cluster under test is unknown")
+    namespaces = sorted(ns for ns in usage if cluster_id in ns)
     if not namespaces:
         sys.exit(f"no control-plane metrics for cluster {cluster_id!r} in {dump}; "
                  f"namespaces present: {', '.join(sorted(usage)) or 'none'}")
