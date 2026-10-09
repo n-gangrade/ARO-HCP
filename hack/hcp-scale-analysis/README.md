@@ -10,6 +10,7 @@ hosted-cluster size, plus a note on how much to trust each size.
 | `plot_controlplane_usage.py` | Graphs one run's total control-plane CPU and memory over time, into `graphs/<run>/` |
 | `container_usage.py` | Prints one run's per-container usage: every container, or each copy of one container with `--container` |
 | `combine_usage.py` | Works out per-container usage for many runs and writes `container-usage.json` |
+| `component_requests.py` | Prints what one copy of each component (pod) needs for each run, from `container-usage.json` |
 | `run-notes.json` | Hand-written trust note for each run (`good`, `caveats` or `low`, and why) |
 | `container-usage.json` | Generated: per-container usage of every run, with its trust note. The input for comparing sizes and for the PM page |
 | `graphs/` | Generated: CPU and memory graphs and a `summary.json` for every run |
@@ -45,6 +46,10 @@ To look at one run in detail:
     $PY container_usage.py ~/Downloads/aro-hcp-raw-usage/<run>.ndjson.gz --top 10
     $PY container_usage.py ~/Downloads/aro-hcp-raw-usage/<run>.ndjson.gz --container kube-apiserver
 
+To see what one copy of each component needs, from `container-usage.json` (by run name or number of worker nodes):
+
+    $PY component_requests.py 120
+
 Graph images depend on the matplotlib version, so regenerating them elsewhere can change the PNG files even when
 the numbers don't change. The CPU graphs also draw a 5-minute average, only to make the spiky readings easier to
 read; none of the numbers use it.
@@ -65,6 +70,8 @@ read; none of the numbers use it.
 7. For each run, also add up every copy at each moment to get the whole control plane's total, and take its
    p50 and p95. Each copy's missing readings are filled in along a straight line from its neighboring
    readings, so they don't count as zero.
+8. `component_requests.py` adds up each component's containers into what one copy (pod) of it needs, as
+   Kubernetes reserves per container. A component runs as many copies as the most any of its containers has.
 
 ## Using the numbers
 
