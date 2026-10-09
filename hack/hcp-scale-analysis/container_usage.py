@@ -26,17 +26,14 @@ cluster's real total, see total_usage(), which combine_usage.py records for each
 With --container NAME it instead lists every copy of that one container, including copies
 being replaced, grouped by component and busiest first by the first percentile shown.
 
-Percentiles default to the median (p50, typical usage) and p95 (usage at busy moments).
-Memory percentiles use the readings as recorded. CPU readings are first averaged over
-5 minutes (see --smooth), which hides bursts lasting only seconds, so CPU p50 is close to
-the sustained average rather than the median of the raw readings (which bursts don't move).
-The highest CPU reading as recorded is shown separately. Missing readings are skipped, never
-counted as zero. For CPU, a readings share below 100% can also mean an idle container, as the
-CPU metric drops readings of exactly zero. Repeated copies of the same reading, as in the
-250- and 500-node dumps, are counted once.
+Percentiles default to the median (p50, typical usage) and p95 (usage at busy moments), and
+come from the readings as recorded. Missing readings are skipped, never counted as zero. For
+CPU, a readings share below 100% can also mean an idle container, as the CPU metric drops
+readings of exactly zero. Repeated copies of the same reading, as in the 250- and 500-node
+dumps, are counted once.
 
 Usage:
-  python3 container_usage.py DUMP [--container NAME] [--percentiles P,P,...] [--smooth MINUTES] [--top N]
+  python3 container_usage.py DUMP [--container NAME] [--percentiles P,P,...] [--top N]
 
 Requires Python 3.11 or newer, numpy, and matplotlib through plot_controlplane_usage.
 """
@@ -50,8 +47,8 @@ from collections import defaultdict
 import numpy as np
 
 from hcputil import opener
-from plot_controlplane_usage import (BYTES_TO_GIB, CPU_METRIC, CPU_TO_CORES, MEMORY_METRIC, SMOOTH_MINUTES,
-                                     filled_in_total, parse_time, rolling_average)
+from plot_controlplane_usage import (BYTES_TO_GIB, CPU_METRIC, CPU_TO_CORES, MEMORY_METRIC, filled_in_total,
+                                     parse_time)
 
 # The last reading usually lands a fraction of a second after the churn phase ends, so the window's
 # end is stretched by 1 s to include it. (In the 49-node run it lands 11 s later and is left out.)
@@ -68,13 +65,6 @@ def percentile_list(text):
     return sorted(set(values))
 
 
-def non_negative_minutes(text):
-    value = float(text)
-    if value < 0:
-        raise argparse.ArgumentTypeError("minutes can't be negative")
-    return value
-
-
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -84,9 +74,6 @@ def parse_args():
     parser.add_argument("--percentiles", type=percentile_list, default=[50.0, 95.0], metavar="P,P,...",
                         help="comma-separated percentiles to print, from 0 to 100 "
                              "(default: 50,95; 100 is the highest reading)")
-    parser.add_argument("--smooth", type=non_negative_minutes, default=SMOOTH_MINUTES, metavar="MINUTES",
-                        help=f"average CPU over this many minutes before taking percentiles "
-                             f"(default: {SMOOTH_MINUTES}; 0 uses the readings as recorded)")
     parser.add_argument("--top", type=int, default=0, metavar="N",
                         help="in the summary, show only the N biggest containers (default: all)")
     args = parser.parse_args()
@@ -150,32 +137,27 @@ def read_readings(path, container=None):
     return job or {}, readings, reading_span
 
 
-def copy_stats(points, smooth_minutes, percentiles):
-    """([percentiles], highest reading, number of readings) for one copy's [(time, value)];
-    with smooth_minutes, the percentiles come from averages over that long."""
-    raw = [value for _, value in points]
-    values = [value for _, value in rolling_average(points, smooth_minutes)] if smooth_minutes else raw
-    # A copy present for less than one averaging window has no averages, so no percentiles.
-    results = [np.percentile(values, p) if values else None for p in percentiles]
-    return results, max(raw), len(raw)
+def copy_stats(points, percentiles):
+    """([percentiles], number of readings) for one copy's [(time, value)]."""
+    values = [value for _, value in points]
+    return [np.percentile(values, p) for p in percentiles], len(values)
 
 
 def cells(values, columns, digits):
     return "".join(f"  {v:{c}.{digits}f}" if v is not None else f"  {'-':>{c}}" for v, c in zip(values, columns))
 
 
-def print_copies(copies, smooth_minutes, percentiles, digits):
+def print_copies(copies, percentiles, digits):
     """One row per copy of a single container, grouped by component, busiest first by the first
-    percentile shown (copies with no value for it last)."""
+    percentile shown."""
     headers = [f"p{p:g}" for p in percentiles]
     columns = [max(6, len(h)) for h in headers]
-    rows = [(*copy_stats(points, smooth_minutes, percentiles), pod) for (_, pod, _), points in copies.items()]
+    rows = [(*copy_stats(points, percentiles), pod) for (_, pod, _), points in copies.items()]
     width = max(len(pod) for *_, pod in rows)
-    print(f"  {'copy':{width}}  readings" + "".join(f"  {h:>{c}}" for h, c in zip(headers, columns))
-          + ("  raw peak" if smooth_minutes else ""))
+    print(f"  {'copy':{width}}  readings" + "".join(f"  {h:>{c}}" for h, c in zip(headers, columns)))
 
     def first_shown(row):
-        return row[0][0] if row[0][0] is not None else float("-inf")
+        return row[0][0]
 
     components = defaultdict(list)
     for row in rows:
@@ -184,37 +166,34 @@ def print_copies(copies, smooth_minutes, percentiles, digits):
                             reverse=True):
         if len(components) > 1:
             print(f"  {component}:")
-        for results, peak, count, pod in sorted(components[component], key=first_shown, reverse=True):
-            print(f"  {pod:{width}}  {count:8d}{cells(results, columns, digits)}"
-                  + (f"  {peak:8.{digits}f}" if smooth_minutes else ""))
+        for results, count, pod in sorted(components[component], key=first_shown, reverse=True):
+            print(f"  {pod:{width}}  {count:8d}{cells(results, columns, digits)}")
 
 
-def summarize(copies, smooth_minutes, percentiles):
+def summarize(copies, percentiles):
     """Combine copies into one row per component and container, biggest first by the busiest copy's
-    first percentile: (component, container, copies, busiest, average, readings_present, raw_peak),
-    where busiest and average hold one value per percentile. Copies with readings for less than
+    first percentile: (component, container, copies, busiest, average, readings_present), where
+    busiest and average hold one value per percentile. Copies with readings for less than
     MIN_COPY_SHARE of the window, such as copies being replaced, are left out."""
     expected = len({when for points in copies.values() for when, _ in points})
     groups = defaultdict(list)
     for (_, pod, container), points in copies.items():
         if len(points) >= MIN_COPY_SHARE * expected:
-            groups[(component_of(pod), container)].append(copy_stats(points, smooth_minutes, percentiles))
+            groups[(component_of(pod), container)].append(copy_stats(points, percentiles))
     rows = []
     for (component, container), stats in groups.items():
-        by_percentile = [[results[i] for results, _, _ in stats if results[i] is not None]
-                         for i in range(len(percentiles))]
-        busiest = [max(values) if values else None for values in by_percentile]
-        average = [float(np.mean(values)) if values else None for values in by_percentile]
-        present = sum(count for *_, count in stats) / (len(stats) * expected)
-        peak = max(peak for _, peak, _ in stats)
-        rows.append((component, container, len(stats), busiest, average, present, peak))
-    rows.sort(key=lambda row: row[3][0] if row[3][0] is not None else float("-inf"), reverse=True)
+        by_percentile = [[results[i] for results, _ in stats] for i in range(len(percentiles))]
+        busiest = [max(values) for values in by_percentile]
+        average = [float(np.mean(values)) for values in by_percentile]
+        present = sum(count for _, count in stats) / (len(stats) * expected)
+        rows.append((component, container, len(stats), busiest, average, present))
+    rows.sort(key=lambda row: row[3][0], reverse=True)
     return rows
 
 
-def print_summary(copies, smooth_minutes, percentiles, digits, top):
+def print_summary(copies, percentiles, digits, top):
     """One row per component and container, with its busiest and average copy, biggest first."""
-    rows = summarize(copies, smooth_minutes, percentiles)
+    rows = summarize(copies, percentiles)
     shown = rows[:top] if top else rows
 
     headers = [f"p{p:g}" for p in percentiles]
@@ -225,11 +204,10 @@ def print_summary(copies, smooth_minutes, percentiles, digits, top):
     width = max([len("component / container")] + [len(name) for name in names])
     print(f"  {'':{width}}  {'':6}  {'busiest copy':^{group}}  {'average copy':^{group}}")
     print(f"  {'component / container':{width}}  copies"
-          + "".join(f"  {h:>{c}}" for h, c in zip(headers * 2, columns * 2))
-          + "  readings" + ("  raw peak" if smooth_minutes else ""))
-    for name, (_, _, count, busiest, average, present, peak) in zip(names, shown):
+          + "".join(f"  {h:>{c}}" for h, c in zip(headers * 2, columns * 2)) + "  readings")
+    for name, (_, _, count, busiest, average, present) in zip(names, shown):
         print(f"  {name:{width}}  {count:6d}{cells(busiest, columns, digits)}{cells(average, columns, digits)}"
-              f"  {present:8.0%}" + (f"  {peak:8.{digits}f}" if smooth_minutes else ""))
+              f"  {present:8.0%}")
     if len(shown) < len(rows):
         print(f"  ... and {len(rows) - len(shown)} more")
 
@@ -247,9 +225,9 @@ def window_copies(readings, cluster_id, start, end, scale):
     return copies
 
 
-def total_usage(copies, smooth_minutes, percentiles):
+def total_usage(copies, percentiles):
     """([percentiles], share filled in) of the whole control plane's total over the window: the sum
-    of every copy's reading at each moment, then for CPU averaged over smooth_minutes like each copy.
+    of every copy's reading at each moment.
 
     Unlike adding up per-container percentiles, this is the cluster's real p95, as it accounts for
     containers peaking at different moments. A copy's missing readings between its first and last
@@ -259,10 +237,7 @@ def total_usage(copies, smooth_minutes, percentiles):
     times, _, total, filled, present = filled_in_total(copies)
     if not times:
         return [None] * len(percentiles), None
-    series = list(zip(times, total))
-    values = [value for _, value in rolling_average(series, smooth_minutes)] if smooth_minutes else list(total)
-    results = [np.percentile(values, p) if values else None for p in percentiles]
-    return results, filled / (present + filled)
+    return [np.percentile(total, p) for p in percentiles], filled / (present + filled)
 
 
 def steady_windows(job, reading_span, cluster_id):
@@ -307,22 +282,19 @@ def main():
               "phase and so a conservative (high) estimate. Treat both as low confidence.")
     if not args.container:
         print(f"Copies count only if they have readings for at least {MIN_COPY_SHARE:.0%} of the window.")
-    cpu_label = (f"CPU (cores), percentiles of {args.smooth:g}-minute averages" if args.smooth
-                 else "CPU (cores)")
     for metric, label, scale, digits in ((MEMORY_METRIC, "memory (GiB)", BYTES_TO_GIB, 2),
-                                         (CPU_METRIC, cpu_label, CPU_TO_CORES, 3)):
+                                         (CPU_METRIC, "CPU (cores)", CPU_TO_CORES, 3)):
         description, start, end = windows[metric]
         if not same_window:
             label += f", {description} {start:%H:%M:%S}-{end:%H:%M:%S} UTC"
-        smooth_minutes = args.smooth if metric == CPU_METRIC else 0
         copies = window_copies(readings[metric], cluster_id, start, end, scale)
         print(f"\n{label}")
         if not copies:
             print(f"  no readings for container {args.container!r}" if args.container else "  no readings")
         elif args.container:
-            print_copies(copies, smooth_minutes, args.percentiles, digits)
+            print_copies(copies, args.percentiles, digits)
         else:
-            print_summary(copies, smooth_minutes, args.percentiles, digits, args.top)
+            print_summary(copies, args.percentiles, digits, args.top)
 
 
 if __name__ == "__main__":

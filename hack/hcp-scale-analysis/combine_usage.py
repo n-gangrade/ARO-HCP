@@ -2,7 +2,7 @@
 """Combine per-container control-plane usage from many kube-burner runs into one JSON file.
 
 For each raw kube-burner dump it works out the same numbers as container_usage.py's summary
-(same windows, same 5-minute CPU averages, copies being replaced left out) for memory and CPU,
+(same windows, readings as recorded, copies being replaced left out) for memory and CPU,
 and writes them with each run's details to one file, container-usage.json next to this script
 by default. That file is the input for comparing sizes and for the PM page: rerun this
 whenever new test runs arrive.
@@ -12,7 +12,7 @@ window used for memory and for CPU, the share of expected readings that exist, a
 control plane's total (p50 and p95 of the sum of every container at each moment, with each
 copy's missing readings filled in from its neighbors). For each container, separately for
 memory (GiB) and CPU (cores): how many copies count, the p50 and p95 of its busiest copy and
-of its average copy, and the share of expected readings that exist, plus the CPU raw peak.
+of its average copy, and the share of expected readings that exist.
 The file is meant to be committed, so it leaves out cluster IDs.
 
 Each run also gets its trust note, copied from a hand-written notes file (run-notes.json next
@@ -33,22 +33,22 @@ from collections import defaultdict
 
 from container_usage import (MIN_COPY_SHARE, NO_CHURN_MEMORY_WINDOW, read_readings, steady_windows,
                              summarize, total_usage, window_copies)
-from plot_controlplane_usage import BYTES_TO_GIB, CPU_METRIC, CPU_TO_CORES, MEMORY_METRIC, SMOOTH_MINUTES
+from plot_controlplane_usage import BYTES_TO_GIB, CPU_METRIC, CPU_TO_CORES, MEMORY_METRIC
 
 PERCENTILES = [50.0, 95.0]
 DECIMALS = 3  # 0.001 GiB is about 1 MiB, and 0.001 cores is 1 millicore
-# (name in the file, metric, conversion to GiB or cores, minutes to average readings over first)
-METRICS = [("memory_gib", MEMORY_METRIC, BYTES_TO_GIB, 0),
-           ("cpu_cores", CPU_METRIC, CPU_TO_CORES, SMOOTH_MINUTES)]
+# (name in the file, metric, conversion to GiB or cores)
+METRICS = [("memory_gib", MEMORY_METRIC, BYTES_TO_GIB),
+           ("cpu_cores", CPU_METRIC, CPU_TO_CORES)]
 FIELDS = {
     "trust": "how much to trust the run, from the hand-written notes file: good, caveats or low",
     "notes": "why, from the hand-written notes file",
     "memory_gib": "memory working set in GiB; percentiles are of the readings as recorded",
-    "cpu_cores": "CPU in cores; percentiles are of 5-minute averages, so p50 is close to the sustained average use",
+    "cpu_cores": "CPU in cores; percentiles are of the readings as recorded",
     "total": "the whole control plane's actual total over the window: p50 and p95 of the sum of every "
-             "container's readings at each moment (for CPU, of 5-minute averages of that sum). Use this for the "
-             "cluster's p95, rather than adding up containers' p95s. filled_in is the share of the summed "
-             "readings that were missing and filled in along a straight line from the copy's neighboring readings",
+             "container's readings at each moment. Use this for the cluster's p95, rather than adding up "
+             "containers' p95s. filled_in is the share of the summed readings that were missing and filled in "
+             "along a straight line from the copy's neighboring readings",
     "copies": "how many copies (pods) count: those with readings for at least half the window, which leaves out "
               "copies being replaced; it can differ between memory and CPU",
     "busiest_copy": "the highest p50 and the highest p95 among the copies, each taken separately, so they can come "
@@ -59,7 +59,6 @@ FIELDS = {
     "readings_present": "share of the expected readings that exist, over the copies that count (for a run, over all "
                         "its containers); below 1 means missing data or, for CPU, an idle container, as the CPU "
                         "metric drops readings of exactly zero",
-    "raw_peak": "highest single CPU reading of any copy, before averaging",
 }
 TRUST_LEVELS = ("good", "caveats", "low")
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -131,23 +130,21 @@ def summarize_run(path):
         "total": {},
     }
     containers = defaultdict(dict)
-    for name, metric, scale, smooth_minutes in METRICS:
+    for name, metric, scale in METRICS:
         description, start, end = windows[metric]
         run["windows"][name] = {"description": description, "start": start.isoformat(), "end": end.isoformat()}
         copies_in_window = window_copies(readings[metric], cluster_id, start, end, scale)
-        rows = summarize(copies_in_window, smooth_minutes, PERCENTILES)
+        rows = summarize(copies_in_window, PERCENTILES)
         counted = sum(copies for _, _, copies, *_ in rows)
-        present = sum(share * copies for _, _, copies, _, _, share, _ in rows)
+        present = sum(share * copies for _, _, copies, _, _, share in rows)
         run["readings_present"][name] = round(present / counted, DECIMALS) if counted else None
-        total, filled = total_usage(copies_in_window, smooth_minutes, PERCENTILES)
+        total, filled = total_usage(copies_in_window, PERCENTILES)
         run["total"][name] = {**by_percentile(total),
                               "filled_in": None if filled is None else round(filled, DECIMALS)}
-        for component, container, copies, busiest, average, share, peak in rows:
-            entry = {"copies": copies, "busiest_copy": by_percentile(busiest),
-                     "average_copy": by_percentile(average), "readings_present": round(share, DECIMALS)}
-            if smooth_minutes:
-                entry["raw_peak"] = round(float(peak), DECIMALS)
-            containers[(component, container)][name] = entry
+        for component, container, copies, busiest, average, share in rows:
+            containers[(component, container)][name] = {
+                "copies": copies, "busiest_copy": by_percentile(busiest),
+                "average_copy": by_percentile(average), "readings_present": round(share, DECIMALS)}
     run["containers"] = [{"component": component, "container": container, **metrics}
                          for (component, container), metrics in sorted(containers.items())]
     return run
@@ -187,7 +184,6 @@ def main():
         "description": "Per-container control-plane usage of each kube-burner run, written by combine_usage.py",
         "settings": {
             "percentiles": PERCENTILES,
-            "cpu_averaged_over_minutes": SMOOTH_MINUTES,
             "min_copy_share": MIN_COPY_SHARE,
             "no_churn_memory_window_minutes": NO_CHURN_MEMORY_WINDOW.total_seconds() / 60,
         },

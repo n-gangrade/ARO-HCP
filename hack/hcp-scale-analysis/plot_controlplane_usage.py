@@ -7,7 +7,8 @@ jobSummary.clusterName), adds up every container at each timestamp, and writes
 these files to graphs/<dump name>/ next to this script (or to --output DIR):
 
   total-cpu.png     total control-plane CPU (cores) over time, as recorded and averaged
-                    over 5 minutes (which hides bursts lasting only seconds)
+                    over 5 minutes; the average only makes the graph easier to read, as the
+                    numbers in container_usage.py and combine_usage.py use the readings as recorded
   total-memory.png  total control-plane memory working set (GiB) over time
   summary.json      job settings, phase times, sampling interval, gaps, skipped duplicates
                     and missing readings

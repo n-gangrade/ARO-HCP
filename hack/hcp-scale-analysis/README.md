@@ -46,7 +46,8 @@ To look at one run in detail:
     $PY container_usage.py ~/Downloads/aro-hcp-raw-usage/<run>.ndjson.gz --container kube-apiserver
 
 Graph images depend on the matplotlib version, so regenerating them elsewhere can change the PNG files even when
-the numbers don't change.
+the numbers don't change. The CPU graphs also draw a 5-minute average, only to make the spiky readings easier to
+read; none of the numbers use it.
 
 ## How the numbers are worked out
 
@@ -56,8 +57,8 @@ the numbers don't change.
 3. Use only the steady part of the run: the kube-burner churn phase. The 500-node run has none, so its memory
    uses the last 10 minutes, once memory has leveled off, and its CPU uses the whole run, which is all create
    phase and so a conservative estimate.
-4. Keep every copy (pod) of every container separate. For CPU, first average each copy's readings over
-   5 minutes, so bursts lasting seconds don't count. Missing readings are skipped, never counted as zero.
+4. Keep every copy (pod) of every container separate, and use the readings as recorded. Missing readings are
+   skipped, never counted as zero.
 5. For each copy, take the median (p50, typical) and p95 (busy moments).
 6. Combine a container's copies two ways: the busiest copy (the highest value among the copies, for each
    percentile separately) and the average copy.
@@ -70,10 +71,8 @@ the numbers don't change.
 - **A cluster's total use:** use the run's `total`, the p50 (typical) and p95 (busy moments) of the whole
   control plane's actual total. Adding up copies x `average_copy.p50` over all containers gives about the same
   typical total, but don't add up p95s: containers don't peak at the same moment, so the sum overstates the
-  cluster's p95, by about 27% for CPU at 250 nodes.
+  cluster's p95, by about 43% for CPU at 250 nodes.
 - **Reservations:** every copy of a container gets the same request, so a request has to fit `busiest_copy`.
-- **CPU p50** comes from 5-minute averages, so it's close to the sustained average use, not the median of the
-  raw readings.
 - **Filled-in readings:** `total.filled_in` says how much of a total was filled in. It's about a quarter for the
   3- and 6-node CPU and almost nothing elsewhere.
 
@@ -86,6 +85,7 @@ the numbers don't change.
   run's `summary.json` says how many readings are missing. A missing reading at the very start or end of a
   copy's readings can't be filled in, so it isn't marked.
 - The CPU metric drops readings of exactly zero, so idle containers show fewer readings.
-- Churn phases of 20–23 minutes give few 5-minute averages, so their CPU p95 is close to the highest value.
+- Churn phases of 20–23 minutes have only about 40 to 47 readings per copy, so a copy's CPU p95 is about its
+  third-highest reading.
 - The runs weren't set up the same way: kube-burner and OpenShift versions, churn delay and actual churn length
   differ.

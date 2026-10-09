@@ -1,6 +1,6 @@
 {
   "about": "Trust notes for each test run, written by hand after looking at its graphs. combine_usage.py copies them into container-usage.json. trust is one of: good, caveats, low.",
-  "all_runs": "Each size has only one test run, so how much its numbers would vary between runs is unknown. The runs also weren't set up the same way: three OpenShift versions (4.19, 4.20, 4.22), four kube-burner versions (1.6.9, 1.7.9, 1.8.0, 1.11.12), a 30-second or 2-minute churn delay, and churn phases that actually lasted 20 to 63 minutes (most were set to 20), so comparing sizes partly compares setups. The shortest churn phases (20 to 23 minutes: 3, 6 and 12 nodes at 100 QPS, 30 and 49 nodes) give few 5-minute averages, so their CPU p95 is close to the highest value.",
+  "all_runs": "Each size has only one test run, so how much its numbers would vary between runs is unknown. The runs also weren't set up the same way: three OpenShift versions (4.19, 4.20, 4.22), four kube-burner versions (1.6.9, 1.7.9, 1.8.0, 1.11.12), a 30-second or 2-minute churn delay, and churn phases that actually lasted 20 to 63 minutes (most were set to 20), so comparing sizes partly compares setups. The shortest churn phases (20 to 23 minutes: 3, 6 and 12 nodes at 100 QPS, 30 and 49 nodes) have only about 40 to 47 readings per copy, so a copy's CPU p95 is about its third-highest reading.",
   "runs": {
     "3-node-aro-hcp": {
       "trust": "caveats",
