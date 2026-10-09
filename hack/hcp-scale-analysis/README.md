@@ -60,8 +60,8 @@ read; none of the numbers use it.
 4. Keep every copy (pod) of every container separate, and use the readings as recorded. Missing readings are
    skipped, never counted as zero.
 5. For each copy, take the median (p50, typical) and p95 (busy moments).
-6. Combine a container's copies two ways: the busiest copy (the highest value among the copies, for each
-   percentile separately) and the average copy.
+6. Combine a container's copies three ways: all the copies' readings put together (what reservations use), the
+   busiest copy (the highest value among the copies, for each percentile separately) and the average copy.
 7. For each run, also add up every copy at each moment to get the whole control plane's total, and take its
    p50 and p95. Each copy's missing readings are filled in along a straight line from its neighboring
    readings, so they don't count as zero.
@@ -72,7 +72,10 @@ read; none of the numbers use it.
   control plane's actual total. Adding up copies x `average_copy.p50` over all containers gives about the same
   typical total, but don't add up p95s: containers don't peak at the same moment, so the sum overstates the
   cluster's p95, by about 43% for CPU at 250 nodes.
-- **Reservations:** every copy of a container gets the same request, so a request has to fit `busiest_copy`.
+- **Reservations:** every copy of a container gets the same request, and which copy is busiest is random, as each
+  client sticks to the copy it first connected to. So use `all_copies`, which treats the copies as interchangeable.
+  For memory it's about the busiest copy, as each copy's memory stays steady; for CPU it's lower, as one copy's
+  spikes are a small part of all the readings.
 - **Filled-in readings:** `total.filled_in` says how much of a total was filled in. It's about a quarter for the
   3- and 6-node CPU and almost nothing elsewhere.
 

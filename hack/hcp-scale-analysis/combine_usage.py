@@ -11,8 +11,9 @@ For each run: its worker nodes, OpenShift version, date, whether it had a churn 
 window used for memory and for CPU, the share of expected readings that exist, and the whole
 control plane's total (p50 and p95 of the sum of every container at each moment, with each
 copy's missing readings filled in from its neighbors). For each container, separately for
-memory (GiB) and CPU (cores): how many copies count, the p50 and p95 of its busiest copy and
-of its average copy, and the share of expected readings that exist.
+memory (GiB) and CPU (cores): how many copies count, the p50 and p95 of its busiest copy, of
+its average copy and of all its copies' readings put together, and the share of expected
+readings that exist.
 The file is meant to be committed, so it leaves out cluster IDs.
 
 Each run also gets its trust note, copied from a hand-written notes file (run-notes.json next
@@ -52,10 +53,13 @@ FIELDS = {
     "copies": "how many copies (pods) count: those with readings for at least half the window, which leaves out "
               "copies being replaced; it can differ between memory and CPU",
     "busiest_copy": "the highest p50 and the highest p95 among the copies, each taken separately, so they can come "
-                    "from different copies; every copy reserves the same, so this is what a reservation has to fit",
+                    "from different copies; which copy is busiest depends on where clients happened to connect",
     "average_copy": "the p50 and p95 averaged over the copies; copies x p50, added up over all containers, closely "
                     "matches the cluster's typical total use. p95s don't add up like that: containers don't peak at "
                     "the same moment, so the sum overstates the cluster's p95",
+    "all_copies": "the p50 and p95 of all the copies' readings put together. Every copy gets the same reservation, "
+                  "and which copy is busiest is random, as each client sticks to the copy it first connected to, so "
+                  "reservations come from this, treating the copies as interchangeable",
     "readings_present": "share of the expected readings that exist, over the copies that count (for a run, over all "
                         "its containers); below 1 means missing data or, for CPU, an idle container, as the CPU "
                         "metric drops readings of exactly zero",
@@ -136,15 +140,16 @@ def summarize_run(path):
         copies_in_window = window_copies(readings[metric], cluster_id, start, end, scale)
         rows = summarize(copies_in_window, PERCENTILES)
         counted = sum(copies for _, _, copies, *_ in rows)
-        present = sum(share * copies for _, _, copies, _, _, share in rows)
+        present = sum(share * copies for _, _, copies, _, _, _, share in rows)
         run["readings_present"][name] = round(present / counted, DECIMALS) if counted else None
         total, filled = total_usage(copies_in_window, PERCENTILES)
         run["total"][name] = {**by_percentile(total),
                               "filled_in": None if filled is None else round(filled, DECIMALS)}
-        for component, container, copies, busiest, average, share in rows:
+        for component, container, copies, busiest, average, all_copies, share in rows:
             containers[(component, container)][name] = {
                 "copies": copies, "busiest_copy": by_percentile(busiest),
-                "average_copy": by_percentile(average), "readings_present": round(share, DECIMALS)}
+                "average_copy": by_percentile(average), "all_copies": by_percentile(all_copies),
+                "readings_present": round(share, DECIMALS)}
     run["containers"] = [{"component": component, "container": container, **metrics}
                          for (component, container), metrics in sorted(containers.items())]
     return run

@@ -9,19 +9,23 @@ off, and CPU uses the whole run, which is all create phase and so a conservative
 estimate. Treat such a run as low confidence.
 
 By default it prints one row per container, for every container: how many copies (pods)
-it has, the chosen percentiles of its busiest copy and of its average copy (the mean
-over its copies), and what share of the expected readings exist. The busiest copy is the
-highest value among the copies for each percentile separately, so its p50 and p95 can come
-from different copies. Copies only count if they have readings for at least half the window,
-which leaves out copies being replaced (from the readings share too). Different components
-can have containers with the same name (for example "manager"), so rows are per component
-and container.
+it has, the chosen percentiles of its busiest copy, of its average copy (the mean over its
+copies) and of all its copies' readings put together, and what share of the expected readings
+exist. The busiest copy is the highest value among the copies for each percentile separately,
+so its p50 and p95 can come from different copies. Copies only count if they have readings for
+at least half the window, which leaves out copies being replaced (from the readings share too).
+Different components can have containers with the same name (for example "manager"), so rows
+are per component and container.
+
+Reservations: every copy of a container gets the same reservation, and which copy is busiest
+is random, as each client sticks to the copy it first connected to. So a reservation comes from
+all the copies' readings put together, which treats the copies as interchangeable.
 
 Adding up: copies x average-copy p50, summed over every container, closely matches the
 cluster's typical total use. Higher percentiles don't add up like that: containers don't peak
-at the same moment, so summing p95s overstates the cluster's p95, and summing copies x busiest
-copy (what reservations sized for the busiest copy add up to) overstates it further. For the
-cluster's real total, see total_usage(), which combine_usage.py records for each run.
+at the same moment, so the sum of copies x p95 (what reservations add up to) is more than the
+cluster's actual p95. For the cluster's real total, see total_usage(), which combine_usage.py
+records for each run.
 
 With --container NAME it instead lists every copy of that one container, including copies
 being replaced, grouped by component and busiest first by the first percentile shown.
@@ -172,27 +176,30 @@ def print_copies(copies, percentiles, digits):
 
 def summarize(copies, percentiles):
     """Combine copies into one row per component and container, biggest first by the busiest copy's
-    first percentile: (component, container, copies, busiest, average, readings_present), where
-    busiest and average hold one value per percentile. Copies with readings for less than
-    MIN_COPY_SHARE of the window, such as copies being replaced, are left out."""
+    first percentile: (component, container, copies, busiest, average, all_copies, readings_present),
+    where busiest, average and all_copies hold one value per percentile, all_copies from every copy's
+    readings put together. Copies with readings for less than MIN_COPY_SHARE of the window, such as
+    copies being replaced, are left out."""
     expected = len({when for points in copies.values() for when, _ in points})
     groups = defaultdict(list)
     for (_, pod, container), points in copies.items():
         if len(points) >= MIN_COPY_SHARE * expected:
-            groups[(component_of(pod), container)].append(copy_stats(points, percentiles))
+            groups[(component_of(pod), container)].append(points)
     rows = []
-    for (component, container), stats in groups.items():
+    for (component, container), group in groups.items():
+        stats = [copy_stats(points, percentiles) for points in group]
         by_percentile = [[results[i] for results, _ in stats] for i in range(len(percentiles))]
         busiest = [max(values) for values in by_percentile]
         average = [float(np.mean(values)) for values in by_percentile]
+        all_copies, _ = copy_stats([point for points in group for point in points], percentiles)
         present = sum(count for _, count in stats) / (len(stats) * expected)
-        rows.append((component, container, len(stats), busiest, average, present))
+        rows.append((component, container, len(stats), busiest, average, all_copies, present))
     rows.sort(key=lambda row: row[3][0], reverse=True)
     return rows
 
 
 def print_summary(copies, percentiles, digits, top):
-    """One row per component and container, with its busiest and average copy, biggest first."""
+    """One row per component and container, biggest first: its busiest copy, average copy and all copies."""
     rows = summarize(copies, percentiles)
     shown = rows[:top] if top else rows
 
@@ -202,12 +209,12 @@ def print_summary(copies, percentiles, digits, top):
     group = sum(columns) + 2 * (len(columns) - 1)
     names = [f"{component} / {container}" for component, container, *_ in shown]
     width = max([len("component / container")] + [len(name) for name in names])
-    print(f"  {'':{width}}  {'':6}  {'busiest copy':^{group}}  {'average copy':^{group}}")
+    print(f"  {'':{width}}  {'':6}  {'busiest copy':^{group}}  {'average copy':^{group}}  {'all copies':^{group}}")
     print(f"  {'component / container':{width}}  copies"
-          + "".join(f"  {h:>{c}}" for h, c in zip(headers * 2, columns * 2)) + "  readings")
-    for name, (_, _, count, busiest, average, present) in zip(names, shown):
+          + "".join(f"  {h:>{c}}" for h, c in zip(headers * 3, columns * 3)) + "  readings")
+    for name, (_, _, count, busiest, average, all_copies, present) in zip(names, shown):
         print(f"  {name:{width}}  {count:6d}{cells(busiest, columns, digits)}{cells(average, columns, digits)}"
-              f"  {present:8.0%}")
+              f"{cells(all_copies, columns, digits)}  {present:8.0%}")
     if len(shown) < len(rows):
         print(f"  ... and {len(rows) - len(shown)} more")
 
