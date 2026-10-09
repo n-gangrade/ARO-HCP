@@ -11,8 +11,10 @@ hosted-cluster size, plus a note on how much to trust each size.
 | `container_usage.py` | Prints one run's per-container usage: every container, or each copy of one container with `--container` |
 | `combine_usage.py` | Works out per-container usage for many runs and writes `container-usage.json` |
 | `component_requests.py` | Prints what one copy of each component (pod) needs for each run, from `container-usage.json` |
+| `simulator_profiles.py` | Writes those numbers for each size in the scheduling simulator's input format, into `simulator-profiles.json` |
 | `run-notes.json` | Hand-written trust note for each run (`good`, `caveats` or `low`, and why) |
 | `container-usage.json` | Generated: per-container usage of every run, with its trust note. The input for comparing sizes and for the PM page |
+| `simulator-profiles.json` | Generated: what one copy of each component needs for each size, for the scheduling simulator |
 | `graphs/` | Generated: CPU and memory graphs and a `summary.json` for every run |
 
 The older scripts here (`extract_all.py`, `extract_kas.py`, `plot_kas.py`, `plot_kas_sum.py`, `report_replicas.py`,
@@ -39,7 +41,12 @@ your Python (for example `PY=../scheduling-simulator/venv/bin/python`):
 
        $PY combine_usage.py ~/Downloads/aro-hcp-raw-usage/*.ndjson*
 
-4. Commit `graphs/`, `run-notes.json` and `container-usage.json`.
+4. Rebuild the simulator's input from it. If a new run tests a size that another run already tests, say which one
+   to use in `PREFERRED_RUNS` in `simulator_profiles.py`:
+
+       $PY simulator_profiles.py
+
+5. Commit `graphs/`, `run-notes.json`, `container-usage.json` and `simulator-profiles.json`.
 
 To look at one run in detail:
 
@@ -49,6 +56,15 @@ To look at one run in detail:
 To see what one copy of each component needs, from `container-usage.json` (by run name or number of worker nodes):
 
     $PY component_requests.py 120
+
+To run the scheduling simulator's website on these numbers instead of its own:
+
+    ARO_HCP_SIM_PROFILES=$PWD/simulator-profiles.json make -C ../scheduling-simulator dev
+
+Its percentile setting makes no difference then, as each component's number is already worked out here; its
+multiplier still applies. The simulator adds a router to every size (from the 49-node run, the only one with a
+router) and two login components the test clusters didn't run, `oauth-openshift` and `openshift-oauth-apiserver`,
+with small fixed sizes.
 
 Graph images depend on the matplotlib version, so regenerating them elsewhere can change the PNG files even when
 the numbers don't change. The CPU graphs also draw a 5-minute average, only to make the spiky readings easier to
