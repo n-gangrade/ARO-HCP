@@ -1,0 +1,180 @@
+{
+  "description": "Cores one hosted cluster of each size takes up on the management-cluster machines, written by hack/hcp-scale-analysis/size_cores.py with the scheduling simulator.",
+  "settings": {
+    "profiles": "simulator-profiles.json",
+    "mix": {
+      "3": 10,
+      "6": 10,
+      "12": 200,
+      "30": 150,
+      "49": 10,
+      "60": 80,
+      "120": 40,
+      "250": 10,
+      "500": 10
+    },
+    "extra_per_missing_size": 10,
+    "machines": "production",
+    "simulator": {
+      "policy": "legacy",
+      "percentile": 75.0,
+      "multiplier": 1.0,
+      "hcps_per_mc": 100,
+      "reserve_slots": 5,
+      "reserve_size": "30",
+      "reservation_mode": "flat",
+      "system_reserved_cpu_mc": 3000.0,
+      "system_reserved_mem_mib": 7550.0,
+      "scaled_reference_vcpu": 32,
+      "node_overhead_cpu_mc": 468.0,
+      "node_overhead_mem_mib": 3592.0,
+      "node_overhead_pods": 11,
+      "buffer_cpu": 0.0,
+      "buffer_mem": 0.1,
+      "buffer_nic": 0.0,
+      "buffer_pods": 0.0,
+      "az_failure_reserve": 0.5,
+      "rollout_surge": 0.15,
+      "concurrent_rolling_hcps": 1,
+      "overflow_az_count": 1,
+      "max_pods_per_node": 225,
+      "unsteered_placement": "overflow",
+      "mode": "exact"
+    }
+  },
+  "fields": {
+    "run": "the test run the size's numbers come from",
+    "trust": "how much to trust that run: good, caveats or low (see its notes in container-usage.json)",
+    "clusters_in_mix": "how many clusters of this size the mix has",
+    "own_cores": "cores one cluster's own control-plane pods reserve",
+    "own_memory_gib": "memory one cluster's own control-plane pods reserve, in GiB",
+    "total_cores": "one cluster's share of the machines' cores, including what no single cluster owns",
+    "shared_cores": "total_cores - own_cores: the cluster's share of what no single cluster owns",
+    "machine_share": "one cluster's share of each machine type, in machines; times a region's hourly prices, it gives the cluster's cost there"
+  },
+  "fleet": {
+    "clusters": 520,
+    "management_clusters": 6,
+    "machines": 429,
+    "machine_cores": 13728,
+    "machines_by_type": {
+      "Standard_E32ds_v6": 429
+    }
+  },
+  "machine_types": {
+    "Standard_E32ds_v6": {
+      "vcpu": 32,
+      "memory_gib": 256
+    }
+  },
+  "sizes": {
+    "3": {
+      "run": "3-node-aro-hcp",
+      "trust": "caveats",
+      "clusters_in_mix": 10,
+      "own_cores": 2.71,
+      "own_memory_gib": 11.31,
+      "total_cores": 25.19,
+      "shared_cores": 22.48,
+      "machine_share": {
+        "Standard_E32ds_v6": 0.787045
+      }
+    },
+    "6": {
+      "run": "6-node-aro-hcp",
+      "trust": "caveats",
+      "clusters_in_mix": 10,
+      "own_cores": 4.08,
+      "own_memory_gib": 12.41,
+      "total_cores": 25.19,
+      "shared_cores": 21.1,
+      "machine_share": {
+        "Standard_E32ds_v6": 0.787045
+      }
+    },
+    "12": {
+      "run": "12-nodes-20-client-qps-rate-aro-hcp",
+      "trust": "good",
+      "clusters_in_mix": 200,
+      "own_cores": 5.52,
+      "own_memory_gib": 15.35,
+      "total_cores": 25.19,
+      "shared_cores": 19.66,
+      "machine_share": {
+        "Standard_E32ds_v6": 0.787122
+      }
+    },
+    "30": {
+      "run": "30-node-aro-hcp",
+      "trust": "good",
+      "clusters_in_mix": 150,
+      "own_cores": 7.83,
+      "own_memory_gib": 23.32,
+      "total_cores": 25.19,
+      "shared_cores": 17.37,
+      "machine_share": {
+        "Standard_E32ds_v6": 0.787228
+      }
+    },
+    "49": {
+      "run": "49-node-hcp-raw",
+      "trust": "caveats",
+      "clusters_in_mix": 10,
+      "own_cores": 9.26,
+      "own_memory_gib": 33.84,
+      "total_cores": 25.19,
+      "shared_cores": 15.93,
+      "machine_share": {
+        "Standard_E32ds_v6": 0.787045
+      }
+    },
+    "60": {
+      "run": "60-node-aro-hcp",
+      "trust": "good",
+      "clusters_in_mix": 80,
+      "own_cores": 5.44,
+      "own_memory_gib": 37.9,
+      "total_cores": 25.21,
+      "shared_cores": 19.77,
+      "machine_share": {
+        "Standard_E32ds_v6": 0.787763
+      }
+    },
+    "120": {
+      "run": "120-node-aro-hcp",
+      "trust": "good",
+      "clusters_in_mix": 40,
+      "own_cores": 8.28,
+      "own_memory_gib": 58.78,
+      "total_cores": 25.2,
+      "shared_cores": 16.92,
+      "machine_share": {
+        "Standard_E32ds_v6": 0.787521
+      }
+    },
+    "250": {
+      "run": "250-node-aro-hcp",
+      "trust": "good",
+      "clusters_in_mix": 10,
+      "own_cores": 18.92,
+      "own_memory_gib": 107.59,
+      "total_cores": 38.89,
+      "shared_cores": 19.97,
+      "machine_share": {
+        "Standard_E32ds_v6": 1.215205
+      }
+    },
+    "500": {
+      "run": "500-node-aro-hcp",
+      "trust": "low",
+      "clusters_in_mix": 10,
+      "own_cores": 36.59,
+      "own_memory_gib": 191.67,
+      "total_cores": 74.26,
+      "shared_cores": 37.67,
+      "machine_share": {
+        "Standard_E32ds_v6": 2.320601
+      }
+    }
+  }
+}

@@ -12,9 +12,11 @@ hosted-cluster size, plus a note on how much to trust each size.
 | `combine_usage.py` | Works out per-container usage for many runs and writes `container-usage.json` |
 | `component_requests.py` | Prints what one copy of each component (pod) needs for each run, from `container-usage.json` |
 | `simulator_profiles.py` | Writes those numbers for each size in the scheduling simulator's input format, into `simulator-profiles.json` |
+| `size_cores.py` | Works out the cores one cluster of each size takes up on the management-cluster machines, with the scheduling simulator, into `size-cores.json` |
 | `run-notes.json` | Hand-written trust note for each run (`good`, `caveats` or `low`, and why) |
-| `container-usage.json` | Generated: per-container usage of every run, with its trust note. The input for comparing sizes and for the PM page |
+| `container-usage.json` | Generated: per-container usage of every run, with its trust note. The input for comparing sizes and for `component_requests.py` and `simulator_profiles.py` |
 | `simulator-profiles.json` | Generated: what one copy of each component needs for each size, for the scheduling simulator |
+| `size-cores.json` | Generated: one cluster's own, shared and total cores for each size. The input for the PM page |
 | `graphs/` | Generated: CPU and memory graphs and a `summary.json` for every run |
 
 The older scripts here (`extract_all.py`, `extract_kas.py`, `plot_kas.py`, `plot_kas_sum.py`, `report_replicas.py`,
@@ -25,6 +27,7 @@ counts the duplicate records in the 250- and 500-node dumps twice.
 
 Python 3.11 or newer (older versions can't parse some of the dumps' timestamps), with numpy and matplotlib. For
 example, the scheduling simulator's virtual environment (`../scheduling-simulator/venv`) with matplotlib added.
+`size_cores.py` also needs the scheduling simulator's own packages, which that environment has.
 
 ## Updating the numbers
 
@@ -46,7 +49,11 @@ your Python (for example `PY=../scheduling-simulator/venv/bin/python`):
 
        $PY simulator_profiles.py
 
-5. Commit `graphs/`, `run-notes.json`, `container-usage.json` and `simulator-profiles.json`.
+5. Rebuild the cores per size from it (a few seconds; about 30 with `--machines simulator`):
+
+       $PY size_cores.py
+
+6. Commit `graphs/`, `run-notes.json`, `container-usage.json`, `simulator-profiles.json` and `size-cores.json`.
 
 To look at one run in detail:
 
@@ -101,6 +108,42 @@ read; none of the numbers use it.
   spikes are a small part of all the readings.
 - **Filled-in readings:** `total.filled_in` says how much of a total was filled in. It's about a quarter for the
   3- and 6-node CPU and almost nothing elsewhere.
+
+## Cores per cluster size
+
+`size_cores.py` packs a sample mix of hosted clusters onto management-cluster machines with the scheduling
+simulator, then splits the machines between the clusters the way the simulator splits its bill: each pool goes to
+each size by its largest share of the pool's CPU, memory, SWIFT NICs or pod slots. For each size, `size-cores.json`
+has:
+
+- `own_cores`: what one cluster's own control-plane pods reserve.
+- `total_cores`: its share of the machines' cores, which also covers what no single cluster owns: system
+  reservations, per-machine daemonsets, spare room for upgrades and a zone failure, placeholder slots for new
+  clusters and unused capacity. `shared_cores` is the difference.
+- `machine_share`: its share of each machine type, in machines. Multiplied by a region's hourly prices, it gives
+  the cluster's cost there, so prices can be added without rerunning the simulator, which picks machines without
+  looking at prices.
+
+These depend on assumptions, recorded in the file's `settings`:
+
+- **The mix.** A cluster's share depends on which clusters share the machines. The default is the simulator's
+  sample fleet (200 clusters of 12 nodes, 150 of 30, 80 of 60, 40 of 120 and 10 of 250), plus 10 of each size it
+  lacks. `--mix` replaces it, for example `--mix 12=300,30=100,120=20`.
+- **The machines.** By default (`--machines production`) they're production's: hosted control planes run on 32-core
+  `Standard_E32ds_v6` machines (`mgmt.aks.userAgentPool.vmSize` in `config/config.yaml`), each keeping back the same
+  fixed 3 cores and 7550 MiB for the system as production's kubelet (`mgmt-fixes/deploy/kubelet-ds`). The simulator
+  always sizes a second pool, which can't use the first pool's machine type; with today's placement it only holds
+  the spare copies kept for upgrades, which production keeps on the same machines, so it gets the same machine
+  under another name (one per management cluster, merged back in the output). On these machines the sample mix
+  needs 13,728 cores, and every cluster of up to 120 nodes takes the same 25.2: whatever its size, a machine can
+  attach at most 7 SWIFT NICs, one per router copy, so 32-core machines run out of NICs with most of their cores
+  unused. That also means a margin (`--multiplier 1.15`) adds no machines.
+- `--machines simulator` lets the simulator choose from its 8 machine types of 4 to 32 cores with its own defaults,
+  as on its website, including a system reservation that shrinks on smaller machines. It picks mostly 16-core ones,
+  and the same mix needs 8,016 cores.
+- **The rest of the simulator's settings** are its defaults, with today's placement (`--policy legacy`) and no
+  margin (`--multiplier 1.15` adds 15%).
+- The simulator breaks ties by the order clusters are listed in, which moves the totals by about 1%.
 
 ## Known limitations
 
