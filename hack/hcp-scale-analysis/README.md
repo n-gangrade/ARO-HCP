@@ -187,3 +187,37 @@ for now, used only to group the rows; costs in dollars aren't included yet. To c
   (GOMEMLIMIT) production sets for that size class (`kasGoMemLimit` in
   `hypershiftoperator/deploy/templates/cluster.clustersizingconfiguration.yaml`: 12 GiB for 61 to 120 nodes, 24 GiB
   for 121 to 252), so those memory numbers depend on today's limits.
+
+## Data we'd want from future test runs
+
+Each item fixes a problem these runs had:
+
+1. **A churn phase in every run, of the same length (30 minutes or more), starting once memory has leveled off.**
+   The 500-node run has none, so its numbers are rough, and the others' churn phases lasted 20 to 63 minutes: the
+   shortest give only about 40 readings per copy, so a CPU p95 comes down to the third-highest reading.
+2. **The same setup for every size:** OpenShift and kube-burner versions, churn delay, QPS and job settings. These
+   runs used three OpenShift versions, four kube-burner versions and two churn delays, so comparing sizes partly
+   compares setups.
+3. **Two or three runs per size**, to see how much the numbers vary between runs. With one run per size, an odd
+   result, such as the 60-node cluster using less CPU than the 30-node one, can't be told apart from noise.
+4. **A run at the top of each size class:** 60, 120, 252 and 360 worker nodes (small, medium, large and xlarge), so
+   each class's numbers cover its largest clusters. There's no run for xlarge (253 to 360 nodes), and the only run for
+   xxlarge (500 nodes) has no churn phase.
+5. **Clusters set up like production's:** a router and the login components (`oauth-openshift` and
+   `openshift-oauth-apiserver`) in every run. Only the 49-node run had a router, so the scheduling simulator uses its
+   numbers for every size, and no run had the login components, so the simulator gives them small fixed sizes.
+6. **Clean dumps:** each reading once (the 250- and 500-node dumps repeat 60,397 and 30,417 readings), no missing
+   readings (the 3- and 6-node dumps miss about a quarter of their CPU readings), and only the cluster under test
+   (the 3-node dump has control-plane readings from 11 hosted clusters).
+7. **CPU readings of zero kept.** The CPU query ends in `> 0`, which drops readings of exactly zero, so an idle
+   container looks the same as a missing reading. Leaving out `> 0` fixes that.
+8. **The settings each run actually got:** the request rate it achieved (the 30-, 60-, 120- and 250-node runs don't
+   record it, and the 12-node run set to 100 QPS only reached about 6), and its size class's limits, such as the API
+   server's soft memory limit, which probably held the 120- and 250-node runs' busiest copy at about 12 GiB and just
+   under 24 GiB.
+9. **An idle baseline:** a cluster of each size with no test load, to separate what a control plane uses just by
+   existing from what the load adds.
+10. **Real usage from production management clusters, over a week or more.** The tests' steady phases last 20 to 63
+    minutes, and the test tool sends all its requests through one client, so they most likely all reach one API
+    server copy, which makes it much busier than production's many clients would. The scheduling simulator's
+    `observed` tool (`../scheduling-simulator/observed/`) collects this kind of data.
