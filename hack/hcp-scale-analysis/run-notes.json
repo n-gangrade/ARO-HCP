@@ -32,11 +32,11 @@
     },
     "120-node-aro-hcp": {
       "trust": "good",
-      "notes": "Complete data, with a long churn phase (33 minutes)."
+      "notes": "Complete data, with a long churn phase (33 minutes). Its busiest kube-apiserver copy's memory levels off at about 12 GiB, the soft memory limit (GOMEMLIMIT) production sets for clusters of 61 to 120 nodes, so the limit probably held it there and its memory numbers would change with the limit."
     },
     "250-node-aro-hcp": {
       "trust": "good",
-      "notes": "Complete once its duplicate records are removed, which the scripts do, with a long churn phase (63 minutes)."
+      "notes": "Complete once its duplicate records are removed, which the scripts do, with a long churn phase (63 minutes). Its busiest kube-apiserver copy's memory levels off just under 24 GiB, the soft memory limit (GOMEMLIMIT) production sets for clusters of 121 to 252 nodes, so the limit probably held it there and its memory numbers would change with the limit."
     },
     "500-node-aro-hcp": {
       "trust": "low",

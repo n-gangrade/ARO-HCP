@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hosted control plane cores estimate</title>
+<style>
+  body { font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #1f2328; max-width: 1000px; margin: 2rem auto; padding: 0 1rem; }
+  h1 { font-size: 1.6rem; margin: 0 0 .25rem; }
+  h2 { font-size: 1.2rem; margin: 2rem 0 .5rem; padding-bottom: .25rem; border-bottom: 1px solid #d0d7de; }
+  .muted { color: #57606a; }
+  table { border-collapse: collapse; width: 100%; margin: .5rem 0; }
+  th, td { padding: .35rem .5rem; border-bottom: 1px solid #d0d7de; text-align: left; vertical-align: middle; }
+  th { background: #f6f8fa; font-weight: 600; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  tfoot td { font-weight: 600; }
+  input, select, button { font: inherit; }
+  input[type="text"] { width: 100%; box-sizing: border-box; }
+  input[type="number"] { width: 5.5rem; text-align: right; }
+  input[aria-invalid="true"] { outline: 2px solid #cf222e; }
+  button { cursor: pointer; }
+  .trust-good { color: #1a7f37; }
+  .trust-caveats { color: #9a6700; }
+  .trust-low { color: #cf222e; }
+  .notice { border-left: 4px solid #bf8700; background: #fff8c5; padding: .5rem .75rem; margin: .75rem 0; }
+  .empty { color: #57606a; font-style: italic; }
+  details { margin: .75rem 0; }
+  summary { cursor: pointer; font-weight: 600; }
+  @media print { .no-print { display: none !important; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Hosted control plane cores estimate</h1>
+  <p class="muted">How many management-cluster cores ARO-HCP needs to run customers' hosted control planes, worked out
+    from scale-test data. Add a row for each customer, region and cluster size; the totals update as you type.</p>
+</header>
+
+<main>
+  <section>
+    <h2>Clusters</h2>
+    <table id="inputs">
+      <thead>
+        <tr>
+          <th scope="col">Customer</th>
+          <th scope="col">Region</th>
+          <th scope="col">Cluster size (worker nodes)</th>
+          <th scope="col" class="num">How many</th>
+          <th scope="col"><span class="no-print">Remove</span></th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <button type="button" id="add-row" class="no-print">Add a row</button>
+    <div id="notices" aria-live="polite"></div>
+  </section>
+
+  <section>
+    <h2>Cores to request per region</h2>
+    <p class="muted">Total cores are the clusters' own cores plus their share of what clusters share. Requests are
+      rounded up to whole cores.</p>
+    <table id="by-region">
+      <thead>
+        <tr>
+          <th scope="col">Region</th>
+          <th scope="col" class="num">Clusters</th>
+          <th scope="col" class="num">Own cores</th>
+          <th scope="col" class="num">Shared cores</th>
+          <th scope="col" class="num">Total cores</th>
+          <th scope="col" class="num">Cores to request</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+      <tfoot></tfoot>
+    </table>
+  </section>
+
+  <section>
+    <h2>Per customer and region</h2>
+    <table id="by-customer">
+      <thead>
+        <tr>
+          <th scope="col">Customer</th>
+          <th scope="col">Region</th>
+          <th scope="col" class="num">Clusters</th>
+          <th scope="col" class="num">Own cores</th>
+          <th scope="col" class="num">Shared cores</th>
+          <th scope="col" class="num">Total cores</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Cores per cluster</h2>
+    <p class="muted">What one hosted cluster of each tested size takes up. For a size in between, use the next larger
+      one.</p>
+    <table id="sizes">
+      <thead>
+        <tr>
+          <th scope="col">Cluster size (worker nodes)</th>
+          <th scope="col" class="num">Own cores</th>
+          <th scope="col" class="num">Shared cores</th>
+          <th scope="col" class="num">Total cores</th>
+          <th scope="col">Test data</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>How these numbers are worked out</h2>
+    <ul id="assumptions"></ul>
+    <details>
+      <summary>The test run behind each size</summary>
+      <p id="all-runs-note" class="muted"></p>
+      <table id="runs">
+        <thead>
+          <tr>
+            <th scope="col">Size</th>
+            <th scope="col">Test run</th>
+            <th scope="col">Date</th>
+            <th scope="col">Trust</th>
+            <th scope="col">Notes</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </details>
+  </section>
+</main>
+
+<script id="page-data" type="application/json">{"sizes": [{"size": "3", "run": "3-node-aro-hcp", "trust": "caveats", "date": "2026-03-03", "notes": "Memory is complete, but only 74% of CPU readings exist, so its CPU numbers, especially peaks, are less reliable. Its CPU graph marks the moments that read low, and its totals fill in the missing readings. Runs a newer OpenShift (4.20) than most runs (4.19).", "own_cores": 2.71, "total_cores": 25.19}, {"size": "6", "run": "6-node-aro-hcp", "trust": "caveats", "date": "2026-03-03", "notes": "Only 72% of CPU readings exist and a few memory readings are missing, so its CPU numbers, especially peaks, are less reliable. Its graphs mark the moments that read low, and its totals fill in the missing readings. Runs a newer OpenShift (4.20) than most runs (4.19).", "own_cores": 4.08, "total_cores": 25.19}, {"size": "12", "run": "12-nodes-20-client-qps-rate-aro-hcp", "trust": "good", "date": "2025-11-14", "notes": "Complete data. Its churn phase was set to 30 minutes instead of the usual 20, and an earlier kube-apiserver rollout was just finishing as churn began (the last old copy's last reading is 12 seconds into it), which barely affects the numbers.", "own_cores": 5.52, "total_cores": 25.19}, {"size": "30", "run": "30-node-aro-hcp", "trust": "good", "date": "2025-10-10", "notes": "Complete data.", "own_cores": 7.83, "total_cores": 25.19}, {"size": "49", "run": "49-node-hcp-raw", "trust": "caveats", "date": "2026-08-14", "notes": "Complete data, but a different setup from the other runs: newer OpenShift (4.22, most runs are 4.19) and kube-burner (1.11.12) versions, and the only run with a router. Uses more memory than the 60-node run.", "own_cores": 9.26, "total_cores": 25.19}, {"size": "60", "run": "60-node-aro-hcp", "trust": "good", "date": "2025-10-15", "notes": "Complete data, with a long churn phase (36 minutes).", "own_cores": 5.44, "total_cores": 25.21}, {"size": "120", "run": "120-node-aro-hcp", "trust": "good", "date": "2025-10-20", "notes": "Complete data, with a long churn phase (33 minutes). Its busiest kube-apiserver copy's memory levels off at about 12 GiB, the soft memory limit (GOMEMLIMIT) production sets for clusters of 61 to 120 nodes, so the limit probably held it there and its memory numbers would change with the limit.", "own_cores": 8.28, "total_cores": 25.2}, {"size": "250", "run": "250-node-aro-hcp", "trust": "good", "date": "2025-10-23", "notes": "Complete once its duplicate records are removed, which the scripts do, with a long churn phase (63 minutes). Its busiest kube-apiserver copy's memory levels off just under 24 GiB, the soft memory limit (GOMEMLIMIT) production sets for clusters of 121 to 252 nodes, so the limit probably held it there and its memory numbers would change with the limit.", "own_cores": 18.92, "total_cores": 38.89}, {"size": "500", "run": "500-node-aro-hcp", "trust": "low", "date": "2025-10-30", "notes": "No churn phase, and memory climbs until near the end: memory comes from its last 10 minutes, once it has leveled off, and CPU from the whole run, which is all create phase and so a conservative (high) estimate. The memory may be a few percent low, as in the large runs (60 to 250 nodes) churn-phase memory was 0 to 8% above the end of their create phase. Ran with 498 workers. Its duplicate records are removed by the scripts.", "own_cores": 36.59, "total_cores": 74.26}], "assumptions": ["Usage comes from one kube-burner scale test per cluster size: for each container, the 95th percentile of all its copies' readings during the test's steady churn phase. A pod reserves what its containers add up to.", "Own cores: what one cluster's own control-plane pods reserve, including a router and two login components that every cluster runs.", "Shared cores: the cluster's share of what no single cluster owns: system reservations and agents on every machine, spare room for upgrades and a zone failure, placeholder slots for new clusters, and room left unused when machines fill up on one resource first. It comes from the scheduling simulator packing a sample mix of 520 clusters (10 of 3 nodes, 10 of 6 nodes, 200 of 12 nodes, 150 of 30 nodes, 10 of 49 nodes, 80 of 60 nodes, 40 of 120 nodes, 10 of 250 nodes, 10 of 500 nodes) onto production's management-cluster machines, Standard_E32ds_v6 (32 cores, 256 GiB).", "Placement: today's placement, with 3 copies of each API server, one in each availability zone.", "No safety margin is added.", "These are estimates for planning, not an exact bill. They cover the management-cluster machines only, and don't include costs in dollars yet."], "notes_for_all_runs": "Each size has only one test run, so how much its numbers would vary between runs is unknown. The runs also weren't set up the same way: three OpenShift versions (4.19, 4.20, 4.22), four kube-burner versions (1.6.9, 1.7.9, 1.8.0, 1.11.12), a 30-second or 2-minute churn delay, and churn phases that actually lasted 20 to 63 minutes (most were set to 20), so comparing sizes partly compares setups. The shortest churn phases (20 to 23 minutes: 3, 6 and 12 nodes at 100 QPS, 30 and 49 nodes) have only about 40 to 47 readings per copy, so a copy's CPU p95 is about its third-highest reading."}</script>
+<script>
+"use strict";
+(function () {
+  const DATA = JSON.parse(document.getElementById("page-data").textContent);
+  const SIZES = DATA.sizes.map((s) => ({ ...s, shared_cores: s.total_cores - s.own_cores }));
+  const BY_SIZE = new Map(SIZES.map((s) => [s.size, s]));
+  const TRUST_MEANING = {
+    good: "complete test data",
+    caveats: "test data with gaps, or a different test setup",
+    low: "the test had no steady phase, so the numbers are rough",
+  };
+  const ONE_DECIMAL = new Intl.NumberFormat("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const WHOLE = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+  const inputRows = document.querySelector("#inputs tbody");
+
+  function cores(n) { return ONE_DECIMAL.format(n); }
+  function toRequest(n) { return Math.ceil(n - 1e-6); }
+
+  function cell(content, className) {
+    const td = document.createElement("td");
+    if (content instanceof Node) td.append(content); else td.textContent = content;
+    if (className) td.className = className;
+    return td;
+  }
+
+  function row(cells) {
+    const tr = document.createElement("tr");
+    tr.append(...cells);
+    return tr;
+  }
+
+  function trustText(size) {
+    const span = document.createElement("span");
+    span.className = "trust-" + size.trust;
+    span.textContent = size.trust + ": " + TRUST_MEANING[size.trust];
+    return span;
+  }
+
+  function sizeLabel(size) {
+    return size.size + " nodes" + (size.trust === "good" ? "" : " (" + size.trust + " trust)");
+  }
+
+  function addRow(values) {
+    const customer = document.createElement("input");
+    customer.type = "text";
+    customer.setAttribute("aria-label", "Customer");
+    customer.value = values.customer || "";
+    const region = document.createElement("input");
+    region.type = "text";
+    region.setAttribute("aria-label", "Region");
+    region.value = values.region || "";
+    const size = document.createElement("select");
+    size.setAttribute("aria-label", "Cluster size");
+    size.append(new Option("Choose a size", ""));
+    for (const s of SIZES) size.append(new Option(sizeLabel(s), s.size));
+    size.value = values.size || "";
+    const count = document.createElement("input");
+    count.type = "number";
+    count.min = "0";
+    count.step = "1";
+    count.setAttribute("aria-label", "How many clusters");
+    count.value = values.count === undefined ? "1" : String(values.count);
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "Remove";
+    remove.setAttribute("aria-label", "Remove this row");
+    const tr = row([cell(customer), cell(region), cell(size), cell(count, "num"), cell(remove, "no-print")]);
+    remove.addEventListener("click", () => { tr.remove(); update(); });
+    for (const control of [customer, region, size, count]) control.addEventListener("input", update);
+    inputRows.append(tr);
+    update();
+    return tr;
+  }
+
+  function readRows() {
+    const rows = [];
+    let missingSize = 0;
+    let badCount = 0;
+    for (const tr of inputRows.rows) {
+      const [customer, region, size, count] = tr.querySelectorAll("input, select");
+      const n = Number(count.value);
+      const countOk = count.value.trim() !== "" && Number.isInteger(n) && n >= 0;
+      count.setAttribute("aria-invalid", String(!countOk));
+      if (!countOk) { badCount++; continue; }
+      if (!BY_SIZE.has(size.value)) {
+        if (customer.value.trim() || region.value.trim()) missingSize++;
+        continue;
+      }
+      rows.push({ customer: customer.value.trim(), region: region.value.trim(), size: BY_SIZE.get(size.value), count: n });
+    }
+    return { rows, missingSize, badCount };
+  }
+
+  function group(rows, keyOf, labelsOf) {
+    const groups = new Map();
+    for (const r of rows) {
+      const key = keyOf(r);
+      let g = groups.get(key);
+      if (!g) {
+        g = { labels: labelsOf(r), clusters: 0, own: 0, shared: 0, total: 0 };
+        groups.set(key, g);
+      }
+      g.clusters += r.count;
+      g.own += r.count * r.size.own_cores;
+      g.shared += r.count * r.size.shared_cores;
+      g.total += r.count * r.size.total_cores;
+    }
+    return [...groups.values()].sort((a, b) => a.labels.join("\u0000").localeCompare(b.labels.join("\u0000")));
+  }
+
+  function regionLabel(r) { return r.region || "(no region)"; }
+  function customerLabel(r) { return r.customer || "(no customer)"; }
+
+  function fill(tbody, rows, columns, emptyText) {
+    tbody.replaceChildren();
+    if (!rows.length) {
+      const td = cell(emptyText, "empty");
+      td.colSpan = columns;
+      tbody.append(row([td]));
+      return;
+    }
+    for (const cells of rows) tbody.append(row(cells));
+  }
+
+  function update() {
+    const { rows, missingSize, badCount } = readRows();
+
+    const regions = group(rows, (r) => r.region.toLowerCase(), (r) => [regionLabel(r)]);
+    fill(document.querySelector("#by-region tbody"), regions.map((g) => [
+      cell(g.labels[0]), cell(WHOLE.format(g.clusters), "num"), cell(cores(g.own), "num"),
+      cell(cores(g.shared), "num"), cell(cores(g.total), "num"), cell(WHOLE.format(toRequest(g.total)), "num"),
+    ]), 6, "Add clusters above to see the totals.");
+    const foot = document.querySelector("#by-region tfoot");
+    foot.replaceChildren();
+    if (regions.length) {
+      const sum = (key) => regions.reduce((total, g) => total + g[key], 0);
+      foot.append(row([
+        cell("All regions"), cell(WHOLE.format(sum("clusters")), "num"), cell(cores(sum("own")), "num"),
+        cell(cores(sum("shared")), "num"), cell(cores(sum("total")), "num"),
+        cell(WHOLE.format(regions.reduce((total, g) => total + toRequest(g.total), 0)), "num"),
+      ]));
+    }
+
+    const pairs = group(rows, (r) => r.customer.toLowerCase() + "\u0000" + r.region.toLowerCase(),
+                        (r) => [customerLabel(r), regionLabel(r)]);
+    fill(document.querySelector("#by-customer tbody"), pairs.map((g) => [
+      cell(g.labels[0]), cell(g.labels[1]), cell(WHOLE.format(g.clusters), "num"), cell(cores(g.own), "num"),
+      cell(cores(g.shared), "num"), cell(cores(g.total), "num"),
+    ]), 6, "Add clusters above to see the totals.");
+
+    const notices = document.getElementById("notices");
+    notices.replaceChildren();
+    const notice = (text) => {
+      const p = document.createElement("p");
+      p.className = "notice";
+      p.textContent = text;
+      notices.append(p);
+    };
+    if (badCount) notice(badCount + (badCount === 1 ? " row isn't" : " rows aren't") +
+                         " counted: \u201cHow many\u201d must be a whole number of 0 or more.");
+    if (missingSize) notice(missingSize + (missingSize === 1 ? " row isn't" : " rows aren't") +
+                            " counted yet: choose a cluster size.");
+    const lessReliable = SIZES.filter((s) => s.trust !== "good" && rows.some((r) => r.size === s && r.count > 0));
+    if (lessReliable.length) notice("Less reliable test data for " +
+      lessReliable.map((s) => s.size + " nodes (" + s.trust + ": " + TRUST_MEANING[s.trust] + ")").join("; ") +
+      ". See \u201cThe test run behind each size\u201d below.");
+  }
+
+  function showReference() {
+    fill(document.querySelector("#sizes tbody"), SIZES.map((s) => [
+      cell(s.size), cell(cores(s.own_cores), "num"), cell(cores(s.shared_cores), "num"),
+      cell(cores(s.total_cores), "num"), cell(trustText(s)),
+    ]), 5, "No sizes.");
+    const list = document.getElementById("assumptions");
+    for (const text of DATA.assumptions) {
+      const li = document.createElement("li");
+      li.textContent = text;
+      list.append(li);
+    }
+    document.getElementById("all-runs-note").textContent = DATA.notes_for_all_runs || "";
+    fill(document.querySelector("#runs tbody"), SIZES.map((s) => [
+      cell(s.size), cell(s.run || ""), cell(s.date || ""), cell(trustText(s)), cell(s.notes || ""),
+    ]), 5, "No test runs.");
+  }
+
+  document.getElementById("add-row").addEventListener("click", () => {
+    addRow({}).querySelector("input").focus();
+  });
+  showReference();
+  addRow({});
+})();
+</script>
+</body>
+</html>

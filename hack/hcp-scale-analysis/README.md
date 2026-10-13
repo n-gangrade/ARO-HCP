@@ -13,10 +13,13 @@ hosted-cluster size, plus a note on how much to trust each size.
 | `component_requests.py` | Prints what one copy of each component (pod) needs for each run, from `container-usage.json` |
 | `simulator_profiles.py` | Writes those numbers for each size in the scheduling simulator's input format, into `simulator-profiles.json` |
 | `size_cores.py` | Works out the cores one cluster of each size takes up on the management-cluster machines, with the scheduling simulator, into `size-cores.json` |
+| `build_pm_page.py` | Builds the PM page, `pm-page.html`, from `pm-page-template.html` and `size-cores.json` |
+| `pm-page-template.html` | The PM page's layout and code, without the numbers |
 | `run-notes.json` | Hand-written trust note for each run (`good`, `caveats` or `low`, and why) |
 | `container-usage.json` | Generated: per-container usage of every run, with its trust note. The input for comparing sizes and for `component_requests.py` and `simulator_profiles.py` |
 | `simulator-profiles.json` | Generated: what one copy of each component needs for each size, for the scheduling simulator |
 | `size-cores.json` | Generated: one cluster's own, shared and total cores for each size. The input for the PM page |
+| `pm-page.html` | Generated: the PM page, a single self-contained file that estimates the cores to request per region and customer |
 | `graphs/` | Generated: CPU and memory graphs and a `summary.json` for every run |
 
 The older scripts here (`extract_all.py`, `extract_kas.py`, `plot_kas.py`, `plot_kas_sum.py`, `report_replicas.py`,
@@ -53,7 +56,12 @@ your Python (for example `PY=../scheduling-simulator/venv/bin/python`):
 
        $PY size_cores.py
 
-6. Commit `graphs/`, `run-notes.json`, `container-usage.json`, `simulator-profiles.json` and `size-cores.json`.
+6. Rebuild the PM page from it:
+
+       $PY build_pm_page.py
+
+7. Commit `graphs/`, `run-notes.json`, `container-usage.json`, `simulator-profiles.json`, `size-cores.json` and
+   `pm-page.html`.
 
 To look at one run in detail:
 
@@ -145,6 +153,23 @@ These depend on assumptions, recorded in the file's `settings`:
   margin (`--multiplier 1.15` adds 15%).
 - The simulator breaks ties by the order clusters are listed in, which moves the totals by about 1%.
 
+## PM page
+
+`pm-page.html` is a single file with the numbers built in: open it in a browser, or send it to someone. It needs no
+server, network connection or other files. Add a row for each customer, region, cluster size and number of
+clusters, and it shows:
+
+- **Cores to request per region:** the clusters' own cores, their shared cores and the total, rounded up to whole
+  cores.
+- **Per customer and region:** the same, split by customer.
+- **Cores per cluster:** the table from `size-cores.json`, with each size's trust level, and a notice when a row
+  uses a size whose test data is less reliable.
+- **How the numbers are worked out:** the assumptions behind them, and the test run and trust note behind each size.
+
+Sizes are the tested numbers of worker nodes; for a size in between, use the next larger one. Regions are free text
+for now, used only to group the rows; costs in dollars aren't included yet. To change the layout, edit
+`pm-page-template.html` and rebuild; `build_pm_page.py` fills in the numbers where it says `__PAGE_DATA__`.
+
 ## Known limitations
 
 - Each size has only one test run, so how much the numbers vary between runs is unknown.
@@ -158,3 +183,7 @@ These depend on assumptions, recorded in the file's `settings`:
   third-highest reading.
 - The runs weren't set up the same way: kube-burner and OpenShift versions, churn delay and actual churn length
   differ.
+- At 120 and 250 nodes, the busiest kube-apiserver copy's memory levels off at about the soft memory limit
+  (GOMEMLIMIT) production sets for that size class (`kasGoMemLimit` in
+  `hypershiftoperator/deploy/templates/cluster.clustersizingconfiguration.yaml`: 12 GiB for 61 to 120 nodes, 24 GiB
+  for 121 to 252), so those memory numbers depend on today's limits.
