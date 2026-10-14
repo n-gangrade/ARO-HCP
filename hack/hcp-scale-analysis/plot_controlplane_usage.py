@@ -6,19 +6,17 @@ pod metrics of the hosted cluster under test (the namespace containing
 jobSummary.clusterName), adds up every container at each timestamp, and writes
 these files to graphs/<dump name>/ next to this script (or to --output DIR):
 
-  total-cpu.png     total control-plane CPU (cores) over time, as recorded and averaged
-                    over 5 minutes; the average only makes the graph easier to read, as the
-                    numbers in container_usage.py and combine_usage.py use the readings as recorded
+  total-cpu.png     total control-plane CPU (cores) over time
   total-memory.png  total control-plane memory working set (GiB) over time
   summary.json      job settings, phase times, sampling interval, gaps, skipped duplicates
                     and missing readings
 
 Both graphs share one time axis and shade the kube-burner phases recorded in
 jobSummary, so a representative steady-state window can be picked by eye.
-A missing reading adds nothing to the recorded total, so where containers' readings are
-missing (as in the 3- and 6-node runs) the graphs mark each moment whose total is more than
-5% too low, and add a dashed estimate with each copy's missing readings filled in along a
-straight line from its neighboring readings. Graphs with no such moments don't change.
+A missing reading adds nothing to the recorded total, so where missing readings leave some
+moment's total more than 5% too low (as in the 3- and 6-node runs), the graphs add a dashed
+line with each copy's missing readings filled in along a straight line from its neighboring
+readings, and shade the gap between the two lines. Other graphs show only the recorded total.
 The output is meant to be committed, so it records the dump's file name but not
 the cluster ID or namespace; those are only printed to the terminal.
 
@@ -47,8 +45,7 @@ MEMORY_METRIC = "podMemory-Controlplane"  # container_memory_working_set_bytes
 CPU_TO_CORES = 1 / 100
 BYTES_TO_GIB = 1 / 1024 ** 3
 GAP_FACTOR = 1.5  # a step this many times the usual sampling interval means samples are missing
-SMOOTH_MINUTES = 5
-LOW_SHARE = 0.05  # a moment is marked when missing readings leave its recorded total more than this share low
+LOW_SHARE = 0.05  # the filled-in line is drawn when missing readings leave a moment's total more than this share low
 PHASE_COLORS = ["tab:orange", "tab:green"]
 GRAPHS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "graphs")
 
@@ -160,19 +157,20 @@ def filled_in_total(copies):
 
 
 def missing_readings(readings, namespaces, metric, scale):
-    """How missing readings affect the recorded total over the whole run: (moments more than LOW_SHARE
-    low as [(time, recorded total)], the filled-in estimate as [(time, total)], a summary dict)."""
+    """How missing readings affect the recorded total over the whole run: (the total with missing
+    readings filled in as [(time, total)] if they leave any moment more than LOW_SHARE low, else [],
+    and a summary dict)."""
     copies = {(namespace, *key): sorted((when, value * scale) for when, value in values.items())
               for namespace in namespaces for key, values in readings[namespace][metric].items()}
     times, recorded, filled_in, filled, present = filled_in_total(copies)
     low_share = np.divide(filled_in - recorded, filled_in, out=np.zeros(len(times)), where=filled_in > 0)
-    low = [(when, value) for when, value, share in zip(times, recorded, low_share) if share > LOW_SHARE]
+    low = int((low_share > LOW_SHARE).sum())
     summary = {
         "share_of_readings_missing": round(filled / (filled + present), 3) if filled + present else None,
-        f"moments_more_than_{LOW_SHARE:.0%}_low".replace("%", "_percent"): len(low),
+        f"moments_more_than_{LOW_SHARE:.0%}_low".replace("%", "_percent"): low,
         "lowest_moment_low_by": round(float(low_share.max()), 3) if len(times) else None,
     }
-    return low, list(zip(times, filled_in)), summary
+    return (list(zip(times, filled_in)) if low else []), summary
 
 
 def interval_and_gaps(points):
@@ -199,20 +197,6 @@ def job_phases(job):
     return [("job", start, end)]
 
 
-def rolling_average(points, minutes):
-    """Centered moving average of [(time, value)]: each point becomes the mean of the readings
-    in the `minutes` around it, kept only where that whole window lies inside the run."""
-    half = dt.timedelta(minutes=minutes) / 2
-    first, last = points[0][0], points[-1][0]
-    averaged = []
-    for when, _ in points:
-        if when - half < first or when + half > last:
-            continue
-        window = [value for other, value in points if when - half <= other < when + half]
-        averaged.append((when, sum(window) / len(window)))
-    return averaged
-
-
 def line_points(points, origin, interval):
     """Plot coordinates (minutes, value), with a break wherever samples are missing."""
     xs, ys = [], []
@@ -225,35 +209,28 @@ def line_points(points, origin, interval):
     return xs, ys
 
 
-def plot_total(path, points, origin, interval, phases, title, ylabel, color, smooth_minutes=None,
-               low=(), estimate=()):
+def plot_total(path, points, origin, interval, phases, title, ylabel, color, filled_in=()):
     fig, ax = plt.subplots(figsize=(12, 4.5))
     for (name, start, end), shade in zip(phases, PHASE_COLORS):
         ax.axvspan(minutes_since(origin, start), minutes_since(origin, end),
                    color=shade, alpha=0.12, label=f"kube-burner {name} phase")
     xs, ys = line_points(points, origin, interval)
-    if smooth_minutes:
-        ax.plot(xs, ys, color=color, lw=1.0, alpha=0.35,
-                label="sum of all control-plane containers, as recorded")
-        smooth_xs, smooth_ys = line_points(rolling_average(points, smooth_minutes), origin, interval)
-        ax.plot(smooth_xs, smooth_ys, color=color, lw=2.2, label=f"same, averaged over {smooth_minutes} minutes")
+    if filled_in:
+        recorded = dict(points)
+        filled_xs, filled_ys = line_points(filled_in, origin, interval)
+        _, recorded_ys = line_points([(when, recorded[when]) for when, _ in filled_in], origin, interval)
+        ax.plot(xs, ys, color=color, lw=1.5, zorder=3, label="sum of all control-plane containers, as recorded")
+        ax.plot(filled_xs, filled_ys, color=color, lw=1.5, ls="--", label="same, with missing readings filled in")
+        ax.fill_between(filled_xs, recorded_ys, filled_ys, color="0.45", alpha=0.3, lw=0,
+                        label="gap left by missing readings")
     else:
         ax.plot(xs, ys, color=color, lw=1.5, label="sum of all control-plane containers")
-    if low:
-        estimated = rolling_average(estimate, smooth_minutes) if smooth_minutes else estimate
-        estimate_xs, estimate_ys = line_points(estimated, origin, interval)
-        ax.plot(estimate_xs, estimate_ys, color=color, lw=1.6, ls="--",
-                label="estimate with missing readings filled in"
-                      + (f", averaged over {smooth_minutes} minutes" if smooth_minutes else ""))
-        ax.plot([minutes_since(origin, when) for when, _ in low], [value for _, value in low], "x",
-                color="black", markersize=5, label=f"moment more than {LOW_SHARE:.0%} low (readings missing)")
     ax.set_title(title, fontsize=11)
     ax.set_xlabel(f"minutes since first sample ({origin:%Y-%m-%d %H:%M:%S} UTC)")
     ax.set_ylabel(ylabel)
     ax.set_ylim(bottom=0)
     ax.grid(True, alpha=0.25)
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.15), ncol=3 if low or not smooth_minutes else 4,
-              frameon=False, fontsize=9)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.15), ncol=3, frameon=False, fontsize=9)
     fig.savefig(path, dpi=130, bbox_inches="tight")
     plt.close(fig)
 
@@ -302,14 +279,14 @@ def main():
     os.makedirs(output, exist_ok=True)
     cpu_interval, cpu_gaps = interval_and_gaps(cpu)
     memory_interval, memory_gaps = interval_and_gaps(memory)
-    cpu_low, cpu_estimate, cpu_missing = missing_readings(readings, namespaces, CPU_METRIC, CPU_TO_CORES)
-    memory_low, memory_estimate, memory_missing = missing_readings(readings, namespaces, MEMORY_METRIC, BYTES_TO_GIB)
+    cpu_filled_in, cpu_missing = missing_readings(readings, namespaces, CPU_METRIC, CPU_TO_CORES)
+    memory_filled_in, memory_missing = missing_readings(readings, namespaces, MEMORY_METRIC, BYTES_TO_GIB)
     plot_total(os.path.join(output, "total-cpu.png"), cpu, origin, cpu_interval, phases,
                f"{name}: total control-plane CPU\n{subtitle}", "CPU (cores)", "tab:blue",
-               smooth_minutes=SMOOTH_MINUTES, low=cpu_low, estimate=cpu_estimate)
+               filled_in=cpu_filled_in)
     plot_total(os.path.join(output, "total-memory.png"), memory, origin, memory_interval, phases,
                f"{name}: total control-plane memory\n{subtitle}", "memory working set (GiB)", "tab:red",
-               low=memory_low, estimate=memory_estimate)
+               filled_in=memory_filled_in)
 
     summary = {
         "dump": os.path.basename(dump),

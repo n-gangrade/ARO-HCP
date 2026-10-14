@@ -4,11 +4,11 @@
   "runs": {
     "3-node-aro-hcp": {
       "trust": "caveats",
-      "notes": "Memory is complete, but only 74% of CPU readings exist, so its CPU numbers, especially peaks, are less reliable. Its CPU graph marks the moments that read low, and its totals fill in the missing readings. Runs a newer OpenShift (4.20) than most runs (4.19)."
+      "notes": "Memory is complete, but only 74% of CPU readings exist, so its CPU numbers, especially peaks, are less reliable. Its CPU graph adds a line with the missing readings filled in, and its totals fill them in too. Runs a newer OpenShift (4.20) than most runs (4.19)."
     },
     "6-node-aro-hcp": {
       "trust": "caveats",
-      "notes": "Only 72% of CPU readings exist and a few memory readings are missing, so its CPU numbers, especially peaks, are less reliable. Its graphs mark the moments that read low, and its totals fill in the missing readings. Runs a newer OpenShift (4.20) than most runs (4.19)."
+      "notes": "Only 72% of CPU readings exist and a few memory readings are missing, so its CPU numbers, especially peaks, are less reliable. Its graphs add a line with the missing readings filled in, and its totals fill them in too. Runs a newer OpenShift (4.20) than most runs (4.19)."
     },
     "12-nodes-20-client-qps-rate-aro-hcp": {
       "trust": "good",

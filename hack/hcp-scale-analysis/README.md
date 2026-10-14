@@ -82,8 +82,7 @@ router) and two login components the test clusters didn't run, `oauth-openshift`
 with small fixed sizes.
 
 Graph images depend on the matplotlib version, so regenerating them elsewhere can change the PNG files even when
-the numbers don't change. The CPU graphs also draw a 5-minute average, only to make the spiky readings easier to
-read; none of the numbers use it.
+the numbers don't change.
 
 ## How the numbers are worked out
 
@@ -174,10 +173,10 @@ for now, used only to group the rows; costs in dollars aren't included yet. To c
 
 - Each size has only one test run, so how much the numbers vary between runs is unknown.
 - The 3- and 6-node dumps are missing about a quarter of their CPU readings, so their CPU numbers, especially
-  peaks, are less reliable. As a missing reading adds nothing to a recorded total, their graphs mark each moment
-  whose total is more than 5% too low and add a dashed estimate with the missing readings filled in, and each
-  run's `summary.json` says how many readings are missing. A missing reading at the very start or end of a
-  copy's readings can't be filled in, so it isn't marked.
+  peaks, are less reliable. As a missing reading adds nothing to a recorded total, their graphs add a dashed line
+  with the missing readings filled in and shade the gap between the two lines, and each run's `summary.json` says
+  how many readings are missing. A missing reading at the very start or end of a copy's readings can't be filled
+  in, so it doesn't show as a gap.
 - The CPU metric drops readings of exactly zero, so idle containers show fewer readings.
 - Churn phases of 20–23 minutes have only about 40 to 47 readings per copy, so a copy's CPU p95 is about its
   third-highest reading.
