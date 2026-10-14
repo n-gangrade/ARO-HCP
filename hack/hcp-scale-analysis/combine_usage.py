@@ -7,9 +7,9 @@ and writes them with each run's details to one file, container-usage.json next t
 by default. That file is the input for comparing sizes and for the PM page: rerun this
 whenever new test runs arrive.
 
-For each run: its worker nodes, OpenShift version, date, whether it had a churn phase, the
-window used for memory and for CPU, the share of expected readings that exist, and the whole
-control plane's total (p50 and p95 of the sum of every container at each moment, with each
+For each run: its worker nodes and total nodes, OpenShift version, date, whether it had a churn
+phase, the window used for memory and for CPU, the share of expected readings that exist, and the
+whole control plane's total (p50 and p95 of the sum of every container at each moment, with each
 copy's missing readings filled in from its neighbors). For each container, separately for
 memory (GiB) and CPU (cores): how many copies count, the p50 and p95 of its busiest copy, of
 its average copy and of all its copies' readings put together, and the share of expected
@@ -42,6 +42,8 @@ DECIMALS = 3  # 0.001 GiB is about 1 MiB, and 0.001 cores is 1 millicore
 METRICS = [("memory_gib", MEMORY_METRIC, BYTES_TO_GIB),
            ("cpu_cores", CPU_METRIC, CPU_TO_CORES)]
 FIELDS = {
+    "total_nodes": "the test cluster's nodes, infra nodes as well as workers; HyperShift picks a cluster's t-shirt "
+                   "size by this count",
     "trust": "how much to trust the run, from the hand-written notes file: good, caveats or low",
     "notes": "why, from the hand-written notes file",
     "memory_gib": "memory working set in GiB; percentiles are of the readings as recorded",
@@ -105,7 +107,7 @@ def with_note(run, notes):
         print(f"warning: {run['run']} has no trust note; look at its graphs and add one to the notes file",
               file=sys.stderr)
         note = {}
-    head = {key: run[key] for key in ("run", "worker_nodes")}
+    head = {key: run[key] for key in ("run", "worker_nodes", "total_nodes")}
     rest = {key: value for key, value in run.items() if key not in head}
     return {**head, "trust": note.get("trust"), "notes": note.get("notes"), **rest}
 
@@ -126,6 +128,7 @@ def summarize_run(path):
     run = {
         "run": os.path.basename(path).removesuffix(".gz").removesuffix(".ndjson"),
         "worker_nodes": job.get("workerNodesCount"),
+        "total_nodes": job.get("totalNodes") or job.get("workerNodesCount"),
         "ocp_version": job.get("ocpVersion"),
         "date": (job.get("timestamp") or "")[:10] or None,
         "churn_phase": windows[CPU_METRIC][0] == "churn phase",

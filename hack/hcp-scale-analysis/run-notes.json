@@ -28,11 +28,11 @@
     },
     "60-node-aro-hcp": {
       "trust": "good",
-      "notes": "Complete data, with a long churn phase (36 minutes)."
+      "notes": "Complete data, with a long churn phase (36 minutes). With its 2 infra nodes it had 62 nodes in total, so it counts as a medium cluster (61 to 120 nodes), not a small one."
     },
     "120-node-aro-hcp": {
       "trust": "good",
-      "notes": "Complete data, with a long churn phase (33 minutes). Its busiest kube-apiserver copy's memory levels off at about 12 GiB, the soft memory limit (GOMEMLIMIT) production sets for clusters of 61 to 120 nodes, so the limit probably held it there and its memory numbers would change with the limit."
+      "notes": "Complete data, with a long churn phase (33 minutes). With its 2 infra nodes it had 122 nodes in total, so it counts as a large cluster (121 to 252 nodes), not a medium one."
     },
     "250-node-aro-hcp": {
       "trust": "good",
