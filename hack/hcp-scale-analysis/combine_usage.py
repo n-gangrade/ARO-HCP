@@ -14,6 +14,14 @@ copy's missing readings filled in from its neighbors). For each container, separ
 memory (GiB) and CPU (cores): how many copies count, the p50 and p95 of its busiest copy, of
 its average copy and of all its copies' readings put together, and the share of expected
 readings that exist.
+
+Each run also gets what Kubernetes reserved for its control plane: its containers' resource
+requests, which the test recorded once, at the end of the run. For each container, how many copies
+it had then and what each copy reserved; for the run, the total. The reservations come from
+kube-state-metrics, whose series the monitoring can keep more than one copy of (the 49-node dump
+keeps one per Prometheus replica), which multiplies their recorded sums. The management cluster's
+node roles, also from kube-state-metrics but recorded without adding anything up, show how many
+copies it kept, and the reservations are divided by that.
 The file is meant to be committed, so it leaves out cluster IDs.
 
 Each run also gets its trust note, copied from a hand-written notes file (run-notes.json next
@@ -26,21 +34,34 @@ Usage:
 Requires Python 3.11 or newer, numpy, and matplotlib through plot_controlplane_usage.
 """
 import argparse
+import datetime as dt
 import json
 import os
 import sys
 import time
 from collections import defaultdict
 
-from container_usage import (MIN_COPY_SHARE, NO_CHURN_MEMORY_WINDOW, read_readings, steady_windows,
-                             summarize, total_usage, window_copies)
-from plot_controlplane_usage import BYTES_TO_GIB, CPU_METRIC, CPU_TO_CORES, MEMORY_METRIC
+from container_usage import (MIN_COPY_SHARE, NO_CHURN_MEMORY_WINDOW, component_of, read_readings,
+                             steady_windows, summarize, total_usage, window_copies)
+from hcputil import opener
+from plot_controlplane_usage import BYTES_TO_GIB, CPU_METRIC, CPU_TO_CORES, MEMORY_METRIC, parse_time
 
 PERCENTILES = [50.0, 95.0]
 DECIMALS = 3  # 0.001 GiB is about 1 MiB, and 0.001 cores is 1 millicore
 # (name in the file, metric, conversion to GiB or cores)
 METRICS = [("memory_gib", MEMORY_METRIC, BYTES_TO_GIB),
            ("cpu_cores", CPU_METRIC, CPU_TO_CORES)]
+# kube_pod_container_resource_requests from kube-state-metrics, added up per copy (pod) and container: what
+# Kubernetes reserved
+MEMORY_RESERVED_METRIC = "podMemoryReq"  # bytes
+CPU_RESERVED_METRIC = "podCPUReq"        # cores
+RESERVATION_METRICS = [("memory_gib", MEMORY_RESERVED_METRIC, BYTES_TO_GIB),
+                       ("cpu_cores", CPU_RESERVED_METRIC, 1)]
+# kube_node_role from kube-state-metrics, as recorded, without adding anything up, so it shows how many copies
+# of each kube-state-metrics series the monitoring kept
+NODE_ROLES_METRIC = "mgmtNodeRoles"
+# A container that reserves nothing counts as running at the end if it has a reading this close to it.
+RUNNING_AT_END = dt.timedelta(minutes=2)
 FIELDS = {
     "total_nodes": "the test cluster's nodes, infra nodes as well as workers; HyperShift picks a cluster's t-shirt "
                    "size by this count",
@@ -65,6 +86,17 @@ FIELDS = {
     "readings_present": "share of the expected readings that exist, over the copies that count (for a run, over all "
                         "its containers); below 1 means missing data or, for CPU, an idle container, as the CPU "
                         "metric drops readings of exactly zero",
+    "reservations": "what Kubernetes reserved for the control plane (its containers' resource requests), which the "
+                    "test recorded once, at the end of the run (time). total adds up every copy of the containers "
+                    "listed; left_out lists containers with a reservation but no usage counted in the window, such "
+                    "as a finished job's, which aren't in the total. counted_times is how many copies of each "
+                    "kube-state-metrics series, where reservations come from, the monitoring kept then (2 when it "
+                    "kept both Prometheus replicas' copies, which doubles the recorded reservations); the numbers "
+                    "here are divided by it",
+    "reserved": "what Kubernetes reserved for each copy (its resource requests), as memory in GiB and CPU in cores, "
+                "and how many copies the container had, at the end of the run. 0 means it reserves nothing: "
+                "Kubernetes records nothing for such a container, although it was running; null means none of its "
+                "copies were left by then",
 }
 TRUST_LEVELS = ("good", "caveats", "low")
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -116,6 +148,104 @@ def by_percentile(values):
     return {f"p{p:g}": None if v is None else round(float(v), DECIMALS) for p, v in zip(PERCENTILES, values)}
 
 
+def read_reservations(path, cluster_id):
+    """(moment, counted_times, reserved), where reserved[(namespace, pod, container)] maps "memory_gib" and
+    "cpu_cores" to what Kubernetes reserved for that copy of one of the tested cluster's containers at `moment`,
+    the last moment the test recorded them; a copy has no entry for what it reserves nothing of. counted_times
+    is how many copies of each kube-state-metrics series the monitoring kept then: each recorded reservation
+    counts that many copies, so the numbers are divided by it. None when there are none for the tested cluster."""
+    names = {metric: (name, scale) for name, metric, scale in RESERVATION_METRICS}
+    recorded = defaultdict(dict)  # {time: {(namespace, pod, container, name): value}}
+    roles = defaultdict(set)      # {(time, node, role): {label set}}, so repeated records count once
+    with opener(path) as f:
+        for line in f:
+            if (MEMORY_RESERVED_METRIC not in line and CPU_RESERVED_METRIC not in line
+                    and NODE_ROLES_METRIC not in line):
+                continue
+            try:
+                record = json.loads(line)
+            except ValueError:
+                continue
+            metric, labels = record.get("metricName"), record.get("labels", {})
+            when = parse_time(record.get("timestamp"))
+            if metric == NODE_ROLES_METRIC:
+                roles[(when, labels.get("node"), labels.get("role"))].add(frozenset(labels.items()))
+                continue
+            container = labels.get("container", "")
+            # "" and "POD" are pod sandbox (pause) cgroups, not workload containers.
+            if metric in names and cluster_id in labels.get("namespace", "") and container not in ("", "POD"):
+                name, scale = names[metric]
+                recorded[when][(labels["namespace"], labels.get("pod", ""), container, name)] = record["value"] * scale
+    if not recorded:
+        return None
+    moment = max(recorded)
+    if roles:
+        nearest = min({when for when, _, _ in roles}, key=lambda when: abs(when - moment))
+        kept = {len(label_sets) for (when, _, _), label_sets in roles.items() if when == nearest}
+        if len(kept) > 1:
+            sys.exit(f"{path}: the monitoring kept {' or '.join(map(str, sorted(kept)))} copies of different series, "
+                     "so the reservations can't be corrected")
+        counted_times = kept.pop()
+    else:
+        print(f"warning: {path} has no {NODE_ROLES_METRIC} records, so whether the monitoring kept more than one "
+              "copy of each series is unknown; assuming one", file=sys.stderr)
+        counted_times = 1
+    reserved = defaultdict(dict)
+    for (namespace, pod, container, name), value in recorded[moment].items():
+        reserved[(namespace, pod, container)][name] = value / counted_times
+    return moment, counted_times, reserved
+
+
+def per_copy(copies, run_name, component, container):
+    """{"copies", "memory_gib", "cpu_cores"}: one container's copies and what each reserves. Copies reserve the
+    same, unless one is being replaced by a copy that reserves something else; then it's the largest."""
+    result = {"copies": len(copies)}
+    for name, _, _ in RESERVATION_METRICS:
+        values = [copy.get(name, 0.0) for copy in copies]
+        if len(set(values)) > 1:
+            print(f"warning: {run_name}: copies of {component} / {container} reserve different {name}; "
+                  "using the largest", file=sys.stderr)
+        result[name] = round(max(values), DECIMALS)
+    return result
+
+
+def add_reservations(containers, reservations, readings, cluster_id, run_name):
+    """Add what each container reserved to `containers` ({(component, container): its numbers}), and return
+    the run's reservations as stored in the file."""
+    if reservations is None:
+        print(f"warning: {run_name} has no reservations for the hosted cluster under test", file=sys.stderr)
+        for numbers in containers.values():
+            numbers["reserved"] = None
+        return None
+    moment, counted_times, reserved = reservations
+    groups = defaultdict(list)  # {(component, container): [each copy's reservations]}
+    for (_, pod, container), copy in reserved.items():
+        groups[(component_of(pod), container)].append(copy)
+    # Kubernetes records nothing for a container that reserves nothing, so a container without a record
+    # reserves nothing if a copy of it was still running then, which its readings show.
+    running = defaultdict(set)
+    for metric_readings in readings.values():
+        for (namespace, pod, container), copy in metric_readings.items():
+            if cluster_id in namespace and copy and max(copy) >= moment - RUNNING_AT_END:
+                running[(component_of(pod), container)].add((namespace, pod))
+    total = {name: 0.0 for name, _, _ in RESERVATION_METRICS}
+    for (component, container), numbers in containers.items():
+        copies = groups.get((component, container))
+        if copies:
+            numbers["reserved"] = per_copy(copies, run_name, component, container)
+            for name in total:
+                total[name] += sum(copy.get(name, 0.0) for copy in copies)
+        elif running[(component, container)]:
+            numbers["reserved"] = {"copies": len(running[(component, container)]), **dict.fromkeys(total, 0.0)}
+        else:
+            numbers["reserved"] = None
+    left_out = [{"component": component, "container": container, **per_copy(copies, run_name, component, container)}
+                for (component, container), copies in sorted(groups.items())
+                if (component, container) not in containers]
+    return {"time": moment.isoformat(), "counted_times": counted_times,
+            "total": {name: round(value, DECIMALS) for name, value in total.items()}, "left_out": left_out}
+
+
 def summarize_run(path):
     """The run's details and its per-container numbers, as stored in the file."""
     job, readings, reading_span = read_readings(path)
@@ -153,6 +283,8 @@ def summarize_run(path):
                 "copies": copies, "busiest_copy": by_percentile(busiest),
                 "average_copy": by_percentile(average), "all_copies": by_percentile(all_copies),
                 "readings_present": round(share, DECIMALS)}
+    run["reservations"] = add_reservations(containers, read_reservations(path, cluster_id), readings, cluster_id,
+                                           run["run"])
     run["containers"] = [{"component": component, "container": container, **metrics}
                          for (component, container), metrics in sorted(containers.items())]
     return run
@@ -189,7 +321,8 @@ def main():
         print(f"note: {name} has a trust note but wasn't one of the runs given", file=sys.stderr)
     runs.sort(key=lambda run: (run["worker_nodes"] or 0, run["run"]))
     data = {
-        "description": "Per-container control-plane usage of each kube-burner run, written by combine_usage.py",
+        "description": "Per-container control-plane usage of each kube-burner run, and what Kubernetes reserved for "
+                       "it, written by combine_usage.py",
         "settings": {
             "percentiles": PERCENTILES,
             "min_copy_share": MIN_COPY_SHARE,

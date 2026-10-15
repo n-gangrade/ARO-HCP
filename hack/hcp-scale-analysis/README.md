@@ -9,7 +9,7 @@ hosted-cluster size, plus a note on how much to trust each size.
 |---|---|
 | `plot_controlplane_usage.py` | Graphs one run's total control-plane CPU and memory over time, into `graphs/<run>/` |
 | `container_usage.py` | Prints one run's per-container usage: every container, or each copy of one container with `--container` |
-| `combine_usage.py` | Works out per-container usage for many runs and writes `container-usage.json` |
+| `combine_usage.py` | Works out per-container usage for many runs, and what Kubernetes reserved for each container, and writes `container-usage.json` |
 | `component_requests.py` | Prints what one copy of each component (pod) needs for each run, from `container-usage.json` |
 | `simulator_profiles.py` | Writes those numbers for each size in the scheduling simulator's input format, into `simulator-profiles.json` |
 | `size_pods.py` | Writes the pods one cluster of each t-shirt size runs, with what each copy needs, into `size-pods.json` |
@@ -17,7 +17,7 @@ hosted-cluster size, plus a note on how much to trust each size.
 | `build_pm_page.py` | Builds the PM page, `pm-page.html`, from `pm-page-template.html` and `size-cores.json` |
 | `pm-page-template.html` | The PM page's layout and code, without the numbers |
 | `run-notes.json` | Hand-written trust note for each run (`good`, `caveats` or `low`, and why) |
-| `container-usage.json` | Generated: per-container usage of every run, with its trust note. The input for comparing sizes and for `component_requests.py` and `simulator_profiles.py` |
+| `container-usage.json` | Generated: per-container usage of every run and what Kubernetes reserved, with the run's trust note. The input for comparing sizes and for `component_requests.py` and `simulator_profiles.py` |
 | `simulator-profiles.json` | Generated: what one copy of each component needs for each size, for the scheduling simulator |
 | `size-pods.json` | Generated: the pods one cluster of each t-shirt size runs, for simulating how clusters pack onto machines |
 | `size-cores.json` | Generated: one cluster's own, shared and total cores for each size. The input for the PM page |
@@ -45,7 +45,7 @@ your Python (for example `PY=../scheduling-simulator/venv/bin/python`):
        $PY plot_controlplane_usage.py ~/Downloads/aro-hcp-raw-usage/<run>.ndjson.gz
 
 2. Add or update the run's entry in `run-notes.json`.
-3. Rebuild the data file from every run (about 30 seconds). It warns about any run without a trust note:
+3. Rebuild the data file from every run (about a minute and a half). It warns about any run without a trust note:
 
        $PY combine_usage.py ~/Downloads/aro-hcp-raw-usage/*.ndjson*
 
@@ -108,6 +108,13 @@ the numbers don't change.
    readings, so they don't count as zero.
 8. `component_requests.py` adds up each component's containers into what one copy (pod) of it needs, as
    Kubernetes reserves per container. A component runs as many copies as the most any of its containers has.
+9. Separately, record what Kubernetes reserved for each container (its resource requests), which the tests
+   recorded once, at the end of each run: per copy for each container (`reserved`) and in total for the run
+   (`reservations`). These come from kube-state-metrics. The 49-node dump keeps two copies of every
+   kube-state-metrics series, one per Prometheus replica, so the reservations it recorded are double the real
+   ones. The management cluster's node roles, also from kube-state-metrics but recorded without adding anything
+   up, show the two copies, so `combine_usage.py` halves them. The usage readings come from the kubelet instead
+   and aren't doubled.
 
 ## Using the numbers
 
@@ -115,10 +122,17 @@ the numbers don't change.
   control plane's actual total. Adding up copies x `average_copy.p50` over all containers gives about the same
   typical total, but don't add up p95s: containers don't peak at the same moment, so the sum overstates the
   cluster's p95, by about 43% for CPU at 250 nodes.
-- **Reservations:** every copy of a container gets the same request, and which copy is busiest is random, as each
-  client sticks to the copy it first connected to. So use `all_copies`, which treats the copies as interchangeable.
-  For memory it's about the busiest copy, as each copy's memory stays steady; for CPU it's lower, as one copy's
-  spikes are a small part of all the readings.
+- **Reservations from usage:** every copy of a container gets the same request, and which copy is busiest is random,
+  as each client sticks to the copy it first connected to. So use `all_copies`, which treats the copies as
+  interchangeable. For memory it's about the busiest copy, as each copy's memory stays steady; for CPU it's lower,
+  as one copy's spikes are a small part of all the readings.
+- **Today's reservations:** `reserved` (per copy) and `reservations.total` (per run) are what production reserved
+  for the test clusters, as opposed to what they used. On OpenShift 4.19, every run's control plane reserved 4.335
+  cores whatever its size, while its memory followed its t-shirt size: 43.3 GiB for small, 75.0 for medium, 133.0
+  for large and 388.0 for xxlarge, as `cluster.clustersizingconfiguration.yaml` sets memory for each size, but not
+  CPU. The 3- and 6-node runs (OpenShift 4.20) reserved 4.295 cores and 43.1 GiB, and the 49-node run (4.22) 4.545
+  cores and 43.6 GiB. A container that reserves nothing has 0. A finished job's container still has a reservation
+  but no usage; it's listed under `reservations.left_out` and not counted, as Kubernetes doesn't count it either.
 - **Filled-in readings:** `total.filled_in` says how much of a total was filled in. It's about a quarter for the
   3- and 6-node CPU and almost nothing elsewhere.
 
@@ -234,9 +248,10 @@ Each item fixes a problem these runs had:
    and the only run for xxlarge (500 nodes) has no churn phase.
 5. **Clusters set up like production's,** with a router in every run. Only the 49-node run had one, so its router
    numbers stand in for every size.
-6. **Clean dumps:** each reading once (the 250- and 500-node dumps repeat 60,397 and 30,417 readings), no missing
-   readings (the 3- and 6-node dumps miss about a quarter of their CPU readings), and only the cluster under test
-   (the 3-node dump has control-plane readings from 11 hosted clusters).
+6. **Clean dumps:** each reading once (the 250- and 500-node dumps repeat 60,397 and 30,417 readings), one copy of
+   each series (the 49-node dump keeps two of every kube-state-metrics series, one per Prometheus replica, which
+   doubles its reservations), no missing readings (the 3- and 6-node dumps miss about a quarter of their CPU
+   readings), and only the cluster under test (the 3-node dump has control-plane readings from 11 hosted clusters).
 7. **CPU readings of zero kept.** The CPU query ends in `> 0`, which drops readings of exactly zero, so an idle
    container looks the same as a missing reading. Leaving out `> 0` fixes that.
 8. **The settings each run actually got:** the request rate it achieved (the 30-, 60-, 120- and 250-node runs don't
