@@ -20,8 +20,8 @@
     "average_copy": "the p50 and p95 averaged over the copies; copies x p50, added up over all containers, closely matches the cluster's typical total use. p95s don't add up like that: containers don't peak at the same moment, so the sum overstates the cluster's p95",
     "all_copies": "the p50 and p95 of all the copies' readings put together. Every copy gets the same reservation, and which copy is busiest is random, as each client sticks to the copy it first connected to, so reservations come from this, treating the copies as interchangeable",
     "readings_present": "share of the expected readings that exist, over the copies that count (for a run, over all its containers); below 1 means missing data or, for CPU, an idle container, as the CPU metric drops readings of exactly zero",
-    "reservations": "what Kubernetes reserved for the control plane (its containers' resource requests), which the test recorded once, at the end of the run (time). total adds up every copy of the containers listed; left_out lists containers with a reservation but no usage counted in the window, such as a finished job's, which aren't in the total. counted_times is how many copies of each kube-state-metrics series, where reservations come from, the monitoring kept then (2 when it kept both Prometheus replicas' copies, which doubles the recorded reservations); the numbers here are divided by it",
-    "reserved": "what Kubernetes reserved for each copy (its resource requests), as memory in GiB and CPU in cores, and how many copies the container had, at the end of the run. 0 means it reserves nothing: Kubernetes records nothing for such a container, although it was running; null means none of its copies were left by then"
+    "reservations": "what Kubernetes reserved for the control plane (its containers' resource requests), which the test recorded once, at the end of the run (time). total adds up every copy of the containers listed; left_out lists containers with a reservation but no usage counted in the window, probably a finished job's (the dumps don't record pods' status), which aren't in the total. series_copies is how many copies of each kube-state-metrics series, where reservations come from, the monitoring kept then (2 when it kept both Prometheus replicas' copies, which doubles the recorded reservations); the numbers here are divided by it. null when the run has no reservations or they can't be corrected",
+    "reserved": "what Kubernetes reserved for each copy (its resource requests), as memory in GiB and CPU in cores, and how many copies the container had, at the end of the run; null when none of its copies were left by then. Kubernetes records nothing for a container that reserves nothing, and the 49-node run's query also misses containers that start before the main ones (sidecars), so a container that was running without a recorded reservation has recorded: false, and gets the reservation the newest run that recorded it had (borrowed_from), or 0 if no run did"
   },
   "notes_for_all_runs": "Each size has only one test run, so how much its numbers would vary between runs is unknown. The runs also weren't set up the same way: three OpenShift versions (4.19, 4.20, 4.22), four kube-burner versions (1.6.9, 1.7.9, 1.8.0, 1.11.12), a 30-second or 2-minute churn delay, and churn phases that actually lasted 20 to 63 minutes (most were set to 20), so comparing sizes partly compares setups. The shortest churn phases (20 to 23 minutes: 3, 6 and 12 nodes at 100 QPS, 30 and 49 nodes) have only about 40 to 47 readings per copy, so a copy's CPU p95 is about its third-highest reading.",
   "runs": [
@@ -64,7 +64,7 @@
       },
       "reservations": {
         "time": "2026-03-03T17:38:56.910000+00:00",
-        "counted_times": 1,
+        "series_copies": 1,
         "total": {
           "memory_gib": 43.104,
           "cpu_cores": 4.295
@@ -153,7 +153,7 @@
         {"component": "ovnkube-control-plane", "container": "ovnkube-control-plane", "memory_gib": {"copies": 2, "busiest_copy": {"p50": 0.137, "p95": 0.164}, "average_copy": {"p50": 0.081, "p95": 0.095}, "all_copies": {"p50": 0.081, "p95": 0.138}, "readings_present": 1.0}, "cpu_cores": {"copies": 2, "busiest_copy": {"p50": 0.004, "p95": 0.007}, "average_copy": {"p50": 0.002, "p95": 0.004}, "all_copies": {"p50": 0.001, "p95": 0.007}, "readings_present": 0.75}, "reserved": {"copies": 2, "memory_gib": 0.195, "cpu_cores": 0.01}},
         {"component": "ovnkube-control-plane", "container": "socks-proxy", "memory_gib": {"copies": 2, "busiest_copy": {"p50": 0.024, "p95": 0.024}, "average_copy": {"p50": 0.023, "p95": 0.023}, "all_copies": {"p50": 0.023, "p95": 0.024}, "readings_present": 1.0}, "cpu_cores": {"copies": 2, "busiest_copy": {"p50": 0.0, "p95": 0.0}, "average_copy": {"p50": 0.0, "p95": 0.0}, "all_copies": {"p50": 0.0, "p95": 0.0}, "readings_present": 0.762}, "reserved": {"copies": 2, "memory_gib": 0.01, "cpu_cores": 0.01}},
         {"component": "ovnkube-control-plane", "container": "token-minter", "memory_gib": {"copies": 2, "busiest_copy": {"p50": 0.025, "p95": 0.025}, "average_copy": {"p50": 0.024, "p95": 0.024}, "all_copies": {"p50": 0.024, "p95": 0.025}, "readings_present": 1.0}, "cpu_cores": {"copies": 2, "busiest_copy": {"p50": 0.0, "p95": 0.001}, "average_copy": {"p50": 0.0, "p95": 0.001}, "all_copies": {"p50": 0.0, "p95": 0.0}, "readings_present": 0.762}, "reserved": {"copies": 2, "memory_gib": 0.029, "cpu_cores": 0.01}},
-        {"component": "package-operator-remote-phase-manager", "container": "manager", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.013, "p95": 0.013}, "average_copy": {"p50": 0.013, "p95": 0.013}, "all_copies": {"p50": 0.013, "p95": 0.013}, "readings_present": 1.0}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.0, "p95": 0.0}, "average_copy": {"p50": 0.0, "p95": 0.0}, "all_copies": {"p50": 0.0, "p95": 0.0}, "readings_present": 0.786}, "reserved": {"copies": 1, "memory_gib": 0.0, "cpu_cores": 0.0}},
+        {"component": "package-operator-remote-phase-manager", "container": "manager", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.013, "p95": 0.013}, "average_copy": {"p50": 0.013, "p95": 0.013}, "all_copies": {"p50": 0.013, "p95": 0.013}, "readings_present": 1.0}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.0, "p95": 0.0}, "average_copy": {"p50": 0.0, "p95": 0.0}, "all_copies": {"p50": 0.0, "p95": 0.0}, "readings_present": 0.786}, "reserved": {"copies": 1, "memory_gib": 0.0, "cpu_cores": 0.0, "recorded": false}},
         {"component": "packageserver", "container": "konnectivity-proxy-socks5", "memory_gib": {"copies": 3, "busiest_copy": {"p50": 0.025, "p95": 0.025}, "average_copy": {"p50": 0.024, "p95": 0.024}, "all_copies": {"p50": 0.024, "p95": 0.025}, "readings_present": 1.0}, "cpu_cores": {"copies": 3, "busiest_copy": {"p50": 0.0, "p95": 0.001}, "average_copy": {"p50": 0.0, "p95": 0.001}, "all_copies": {"p50": 0.0, "p95": 0.001}, "readings_present": 0.714}, "reserved": {"copies": 3, "memory_gib": 0.029, "cpu_cores": 0.01}},
         {"component": "packageserver", "container": "packageserver", "memory_gib": {"copies": 3, "busiest_copy": {"p50": 0.127, "p95": 0.163}, "average_copy": {"p50": 0.126, "p95": 0.147}, "all_copies": {"p50": 0.126, "p95": 0.162}, "readings_present": 1.0}, "cpu_cores": {"copies": 3, "busiest_copy": {"p50": 0.003, "p95": 0.099}, "average_copy": {"p50": 0.003, "p95": 0.062}, "all_copies": {"p50": 0.003, "p95": 0.083}, "readings_present": 0.714}, "reserved": {"copies": 3, "memory_gib": 0.244, "cpu_cores": 0.01}},
         {"component": "redhat-marketplace-catalog", "container": "registry", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.026, "p95": 0.026}, "average_copy": {"p50": 0.026, "p95": 0.026}, "all_copies": {"p50": 0.026, "p95": 0.026}, "readings_present": 1.0}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.006, "p95": 0.008}, "average_copy": {"p50": 0.006, "p95": 0.008}, "all_copies": {"p50": 0.006, "p95": 0.008}, "readings_present": 0.786}, "reserved": {"copies": 1, "memory_gib": 0.332, "cpu_cores": 0.01}},
@@ -199,7 +199,7 @@
       },
       "reservations": {
         "time": "2026-03-03T17:39:07.987000+00:00",
-        "counted_times": 1,
+        "series_copies": 1,
         "total": {
           "memory_gib": 43.104,
           "cpu_cores": 4.295
@@ -288,7 +288,7 @@
         {"component": "ovnkube-control-plane", "container": "ovnkube-control-plane", "memory_gib": {"copies": 2, "busiest_copy": {"p50": 0.17, "p95": 0.179}, "average_copy": {"p50": 0.098, "p95": 0.103}, "all_copies": {"p50": 0.163, "p95": 0.174}, "readings_present": 0.988}, "cpu_cores": {"copies": 2, "busiest_copy": {"p50": 0.01, "p95": 0.019}, "average_copy": {"p50": 0.005, "p95": 0.01}, "all_copies": {"p50": 0.0, "p95": 0.013}, "readings_present": 0.721}, "reserved": {"copies": 2, "memory_gib": 0.195, "cpu_cores": 0.01}},
         {"component": "ovnkube-control-plane", "container": "socks-proxy", "memory_gib": {"copies": 2, "busiest_copy": {"p50": 0.024, "p95": 0.024}, "average_copy": {"p50": 0.024, "p95": 0.024}, "all_copies": {"p50": 0.024, "p95": 0.024}, "readings_present": 0.988}, "cpu_cores": {"copies": 2, "busiest_copy": {"p50": 0.0, "p95": 0.0}, "average_copy": {"p50": 0.0, "p95": 0.0}, "all_copies": {"p50": 0.0, "p95": 0.0}, "readings_present": 0.709}, "reserved": {"copies": 2, "memory_gib": 0.01, "cpu_cores": 0.01}},
         {"component": "ovnkube-control-plane", "container": "token-minter", "memory_gib": {"copies": 2, "busiest_copy": {"p50": 0.025, "p95": 0.025}, "average_copy": {"p50": 0.025, "p95": 0.025}, "all_copies": {"p50": 0.025, "p95": 0.025}, "readings_present": 0.965}, "cpu_cores": {"copies": 2, "busiest_copy": {"p50": 0.0, "p95": 0.001}, "average_copy": {"p50": 0.0, "p95": 0.001}, "all_copies": {"p50": 0.0, "p95": 0.0}, "readings_present": 0.721}, "reserved": {"copies": 2, "memory_gib": 0.029, "cpu_cores": 0.01}},
-        {"component": "package-operator-remote-phase-manager", "container": "manager", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.013, "p95": 0.013}, "average_copy": {"p50": 0.013, "p95": 0.013}, "all_copies": {"p50": 0.013, "p95": 0.013}, "readings_present": 0.977}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.0, "p95": 0.0}, "average_copy": {"p50": 0.0, "p95": 0.0}, "all_copies": {"p50": 0.0, "p95": 0.0}, "readings_present": 0.698}, "reserved": {"copies": 1, "memory_gib": 0.0, "cpu_cores": 0.0}},
+        {"component": "package-operator-remote-phase-manager", "container": "manager", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.013, "p95": 0.013}, "average_copy": {"p50": 0.013, "p95": 0.013}, "all_copies": {"p50": 0.013, "p95": 0.013}, "readings_present": 0.977}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.0, "p95": 0.0}, "average_copy": {"p50": 0.0, "p95": 0.0}, "all_copies": {"p50": 0.0, "p95": 0.0}, "readings_present": 0.698}, "reserved": {"copies": 1, "memory_gib": 0.0, "cpu_cores": 0.0, "recorded": false}},
         {"component": "packageserver", "container": "konnectivity-proxy-socks5", "memory_gib": {"copies": 3, "busiest_copy": {"p50": 0.024, "p95": 0.024}, "average_copy": {"p50": 0.024, "p95": 0.024}, "all_copies": {"p50": 0.024, "p95": 0.024}, "readings_present": 0.977}, "cpu_cores": {"copies": 3, "busiest_copy": {"p50": 0.0, "p95": 0.001}, "average_copy": {"p50": 0.0, "p95": 0.001}, "all_copies": {"p50": 0.0, "p95": 0.0}, "readings_present": 0.744}, "reserved": {"copies": 3, "memory_gib": 0.029, "cpu_cores": 0.01}},
         {"component": "packageserver", "container": "packageserver", "memory_gib": {"copies": 3, "busiest_copy": {"p50": 0.128, "p95": 0.151}, "average_copy": {"p50": 0.125, "p95": 0.147}, "all_copies": {"p50": 0.124, "p95": 0.148}, "readings_present": 0.992}, "cpu_cores": {"copies": 3, "busiest_copy": {"p50": 0.003, "p95": 0.173}, "average_copy": {"p50": 0.003, "p95": 0.131}, "all_copies": {"p50": 0.003, "p95": 0.121}, "readings_present": 0.752}, "reserved": {"copies": 3, "memory_gib": 0.244, "cpu_cores": 0.01}},
         {"component": "redhat-marketplace-catalog", "container": "registry", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.023, "p95": 0.025}, "average_copy": {"p50": 0.023, "p95": 0.025}, "all_copies": {"p50": 0.023, "p95": 0.025}, "readings_present": 0.953}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.006, "p95": 0.007}, "average_copy": {"p50": 0.006, "p95": 0.007}, "all_copies": {"p50": 0.006, "p95": 0.007}, "readings_present": 0.698}, "reserved": {"copies": 1, "memory_gib": 0.332, "cpu_cores": 0.01}},
@@ -334,7 +334,7 @@
       },
       "reservations": {
         "time": "2025-11-24T18:08:59.959000+00:00",
-        "counted_times": 1,
+        "series_copies": 1,
         "total": {
           "memory_gib": 43.328,
           "cpu_cores": 4.335
@@ -423,7 +423,7 @@
         {"component": "ovnkube-control-plane", "container": "ovnkube-control-plane", "memory_gib": {"copies": 2, "busiest_copy": {"p50": 0.199, "p95": 0.206}, "average_copy": {"p50": 0.112, "p95": 0.116}, "all_copies": {"p50": 0.11, "p95": 0.205}, "readings_present": 1.0}, "cpu_cores": {"copies": 2, "busiest_copy": {"p50": 0.007, "p95": 0.039}, "average_copy": {"p50": 0.004, "p95": 0.019}, "all_copies": {"p50": 0.001, "p95": 0.036}, "readings_present": 0.976}, "reserved": {"copies": 2, "memory_gib": 0.195, "cpu_cores": 0.01}},
         {"component": "ovnkube-control-plane", "container": "socks-proxy", "memory_gib": {"copies": 2, "busiest_copy": {"p50": 0.025, "p95": 0.025}, "average_copy": {"p50": 0.024, "p95": 0.024}, "all_copies": {"p50": 0.024, "p95": 0.025}, "readings_present": 1.0}, "cpu_cores": {"copies": 2, "busiest_copy": {"p50": 0.0, "p95": 0.001}, "average_copy": {"p50": 0.0, "p95": 0.0}, "all_copies": {"p50": 0.0, "p95": 0.001}, "readings_present": 1.0}, "reserved": {"copies": 2, "memory_gib": 0.01, "cpu_cores": 0.01}},
         {"component": "ovnkube-control-plane", "container": "token-minter", "memory_gib": {"copies": 2, "busiest_copy": {"p50": 0.025, "p95": 0.025}, "average_copy": {"p50": 0.025, "p95": 0.025}, "all_copies": {"p50": 0.025, "p95": 0.025}, "readings_present": 1.0}, "cpu_cores": {"copies": 2, "busiest_copy": {"p50": 0.0, "p95": 0.001}, "average_copy": {"p50": 0.0, "p95": 0.001}, "all_copies": {"p50": 0.0, "p95": 0.001}, "readings_present": 1.0}, "reserved": {"copies": 2, "memory_gib": 0.029, "cpu_cores": 0.01}},
-        {"component": "package-operator-remote-phase-manager", "container": "manager", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.012, "p95": 0.012}, "average_copy": {"p50": 0.012, "p95": 0.012}, "all_copies": {"p50": 0.012, "p95": 0.012}, "readings_present": 1.0}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.0, "p95": 0.001}, "average_copy": {"p50": 0.0, "p95": 0.001}, "all_copies": {"p50": 0.0, "p95": 0.001}, "readings_present": 1.0}, "reserved": {"copies": 1, "memory_gib": 0.0, "cpu_cores": 0.0}},
+        {"component": "package-operator-remote-phase-manager", "container": "manager", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.012, "p95": 0.012}, "average_copy": {"p50": 0.012, "p95": 0.012}, "all_copies": {"p50": 0.012, "p95": 0.012}, "readings_present": 1.0}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.0, "p95": 0.001}, "average_copy": {"p50": 0.0, "p95": 0.001}, "all_copies": {"p50": 0.0, "p95": 0.001}, "readings_present": 1.0}, "reserved": {"copies": 1, "memory_gib": 0.0, "cpu_cores": 0.0, "recorded": false}},
         {"component": "packageserver", "container": "packageserver", "memory_gib": {"copies": 3, "busiest_copy": {"p50": 0.121, "p95": 0.211}, "average_copy": {"p50": 0.119, "p95": 0.175}, "all_copies": {"p50": 0.119, "p95": 0.164}, "readings_present": 1.0}, "cpu_cores": {"copies": 3, "busiest_copy": {"p50": 0.002, "p95": 0.004}, "average_copy": {"p50": 0.002, "p95": 0.004}, "all_copies": {"p50": 0.002, "p95": 0.004}, "readings_present": 1.0}, "reserved": {"copies": 3, "memory_gib": 0.244, "cpu_cores": 0.01}},
         {"component": "packageserver", "container": "socks5-proxy", "memory_gib": {"copies": 3, "busiest_copy": {"p50": 0.024, "p95": 0.024}, "average_copy": {"p50": 0.024, "p95": 0.024}, "all_copies": {"p50": 0.024, "p95": 0.024}, "readings_present": 1.0}, "cpu_cores": {"copies": 3, "busiest_copy": {"p50": 0.0, "p95": 0.001}, "average_copy": {"p50": 0.0, "p95": 0.001}, "all_copies": {"p50": 0.0, "p95": 0.001}, "readings_present": 1.0}, "reserved": {"copies": 3, "memory_gib": 0.029, "cpu_cores": 0.01}},
         {"component": "redhat-marketplace-catalog", "container": "registry", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.025, "p95": 0.026}, "average_copy": {"p50": 0.025, "p95": 0.026}, "all_copies": {"p50": 0.025, "p95": 0.026}, "readings_present": 1.0}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.007, "p95": 0.008}, "average_copy": {"p50": 0.007, "p95": 0.008}, "all_copies": {"p50": 0.007, "p95": 0.008}, "readings_present": 1.0}, "reserved": {"copies": 1, "memory_gib": 0.332, "cpu_cores": 0.01}},
@@ -469,7 +469,7 @@
       },
       "reservations": {
         "time": "2025-11-14T22:11:59.720000+00:00",
-        "counted_times": 1,
+        "series_copies": 1,
         "total": {
           "memory_gib": 43.328,
           "cpu_cores": 4.335
@@ -558,7 +558,7 @@
         {"component": "ovnkube-control-plane", "container": "ovnkube-control-plane", "memory_gib": {"copies": 2, "busiest_copy": {"p50": 0.206, "p95": 0.209}, "average_copy": {"p50": 0.116, "p95": 0.118}, "all_copies": {"p50": 0.108, "p95": 0.209}, "readings_present": 1.0}, "cpu_cores": {"copies": 2, "busiest_copy": {"p50": 0.01, "p95": 0.038}, "average_copy": {"p50": 0.005, "p95": 0.019}, "all_copies": {"p50": 0.001, "p95": 0.035}, "readings_present": 0.977}, "reserved": {"copies": 2, "memory_gib": 0.195, "cpu_cores": 0.01}},
         {"component": "ovnkube-control-plane", "container": "socks-proxy", "memory_gib": {"copies": 2, "busiest_copy": {"p50": 0.024, "p95": 0.024}, "average_copy": {"p50": 0.024, "p95": 0.024}, "all_copies": {"p50": 0.024, "p95": 0.024}, "readings_present": 1.0}, "cpu_cores": {"copies": 2, "busiest_copy": {"p50": 0.0, "p95": 0.001}, "average_copy": {"p50": 0.0, "p95": 0.0}, "all_copies": {"p50": 0.0, "p95": 0.0}, "readings_present": 1.0}, "reserved": {"copies": 2, "memory_gib": 0.01, "cpu_cores": 0.01}},
         {"component": "ovnkube-control-plane", "container": "token-minter", "memory_gib": {"copies": 2, "busiest_copy": {"p50": 0.025, "p95": 0.025}, "average_copy": {"p50": 0.024, "p95": 0.025}, "all_copies": {"p50": 0.025, "p95": 0.025}, "readings_present": 1.0}, "cpu_cores": {"copies": 2, "busiest_copy": {"p50": 0.0, "p95": 0.001}, "average_copy": {"p50": 0.0, "p95": 0.001}, "all_copies": {"p50": 0.0, "p95": 0.001}, "readings_present": 1.0}, "reserved": {"copies": 2, "memory_gib": 0.029, "cpu_cores": 0.01}},
-        {"component": "package-operator-remote-phase-manager", "container": "manager", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.012, "p95": 0.012}, "average_copy": {"p50": 0.012, "p95": 0.012}, "all_copies": {"p50": 0.012, "p95": 0.012}, "readings_present": 1.0}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.0, "p95": 0.0}, "average_copy": {"p50": 0.0, "p95": 0.0}, "all_copies": {"p50": 0.0, "p95": 0.0}, "readings_present": 1.0}, "reserved": {"copies": 1, "memory_gib": 0.0, "cpu_cores": 0.0}},
+        {"component": "package-operator-remote-phase-manager", "container": "manager", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.012, "p95": 0.012}, "average_copy": {"p50": 0.012, "p95": 0.012}, "all_copies": {"p50": 0.012, "p95": 0.012}, "readings_present": 1.0}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.0, "p95": 0.0}, "average_copy": {"p50": 0.0, "p95": 0.0}, "all_copies": {"p50": 0.0, "p95": 0.0}, "readings_present": 1.0}, "reserved": {"copies": 1, "memory_gib": 0.0, "cpu_cores": 0.0, "recorded": false}},
         {"component": "packageserver", "container": "packageserver", "memory_gib": {"copies": 3, "busiest_copy": {"p50": 0.105, "p95": 0.15}, "average_copy": {"p50": 0.104, "p95": 0.145}, "all_copies": {"p50": 0.104, "p95": 0.144}, "readings_present": 1.0}, "cpu_cores": {"copies": 3, "busiest_copy": {"p50": 0.002, "p95": 0.004}, "average_copy": {"p50": 0.002, "p95": 0.004}, "all_copies": {"p50": 0.002, "p95": 0.004}, "readings_present": 1.0}, "reserved": {"copies": 3, "memory_gib": 0.244, "cpu_cores": 0.01}},
         {"component": "packageserver", "container": "socks5-proxy", "memory_gib": {"copies": 3, "busiest_copy": {"p50": 0.025, "p95": 0.025}, "average_copy": {"p50": 0.024, "p95": 0.024}, "all_copies": {"p50": 0.024, "p95": 0.025}, "readings_present": 1.0}, "cpu_cores": {"copies": 3, "busiest_copy": {"p50": 0.0, "p95": 0.001}, "average_copy": {"p50": 0.0, "p95": 0.001}, "all_copies": {"p50": 0.0, "p95": 0.001}, "readings_present": 1.0}, "reserved": {"copies": 3, "memory_gib": 0.029, "cpu_cores": 0.01}},
         {"component": "redhat-marketplace-catalog", "container": "registry", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.021, "p95": 0.032}, "average_copy": {"p50": 0.021, "p95": 0.032}, "all_copies": {"p50": 0.021, "p95": 0.032}, "readings_present": 1.0}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.006, "p95": 0.009}, "average_copy": {"p50": 0.006, "p95": 0.009}, "all_copies": {"p50": 0.006, "p95": 0.009}, "readings_present": 1.0}, "reserved": {"copies": 1, "memory_gib": 0.332, "cpu_cores": 0.01}},
@@ -604,7 +604,7 @@
       },
       "reservations": {
         "time": "2025-10-10T17:26:04.220000+00:00",
-        "counted_times": 1,
+        "series_copies": 1,
         "total": {
           "memory_gib": 43.328,
           "cpu_cores": 4.335
@@ -693,7 +693,7 @@
         {"component": "ovnkube-control-plane", "container": "ovnkube-control-plane", "memory_gib": {"copies": 2, "busiest_copy": {"p50": 0.223, "p95": 0.254}, "average_copy": {"p50": 0.124, "p95": 0.14}, "all_copies": {"p50": 0.113, "p95": 0.253}, "readings_present": 1.0}, "cpu_cores": {"copies": 2, "busiest_copy": {"p50": 0.009, "p95": 0.065}, "average_copy": {"p50": 0.005, "p95": 0.033}, "all_copies": {"p50": 0.001, "p95": 0.035}, "readings_present": 1.0}, "reserved": {"copies": 2, "memory_gib": 0.195, "cpu_cores": 0.01}},
         {"component": "ovnkube-control-plane", "container": "socks-proxy", "memory_gib": {"copies": 2, "busiest_copy": {"p50": 0.024, "p95": 0.024}, "average_copy": {"p50": 0.024, "p95": 0.024}, "all_copies": {"p50": 0.024, "p95": 0.024}, "readings_present": 1.0}, "cpu_cores": {"copies": 2, "busiest_copy": {"p50": 0.0, "p95": 0.001}, "average_copy": {"p50": 0.0, "p95": 0.001}, "all_copies": {"p50": 0.0, "p95": 0.001}, "readings_present": 1.0}, "reserved": {"copies": 2, "memory_gib": 0.01, "cpu_cores": 0.01}},
         {"component": "ovnkube-control-plane", "container": "token-minter", "memory_gib": {"copies": 2, "busiest_copy": {"p50": 0.025, "p95": 0.025}, "average_copy": {"p50": 0.025, "p95": 0.025}, "all_copies": {"p50": 0.025, "p95": 0.025}, "readings_present": 1.0}, "cpu_cores": {"copies": 2, "busiest_copy": {"p50": 0.0, "p95": 0.001}, "average_copy": {"p50": 0.0, "p95": 0.001}, "all_copies": {"p50": 0.0, "p95": 0.001}, "readings_present": 1.0}, "reserved": {"copies": 2, "memory_gib": 0.029, "cpu_cores": 0.01}},
-        {"component": "package-operator-remote-phase-manager", "container": "manager", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.012, "p95": 0.012}, "average_copy": {"p50": 0.012, "p95": 0.012}, "all_copies": {"p50": 0.012, "p95": 0.012}, "readings_present": 1.0}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.0, "p95": 0.001}, "average_copy": {"p50": 0.0, "p95": 0.001}, "all_copies": {"p50": 0.0, "p95": 0.001}, "readings_present": 1.0}, "reserved": {"copies": 1, "memory_gib": 0.0, "cpu_cores": 0.0}},
+        {"component": "package-operator-remote-phase-manager", "container": "manager", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.012, "p95": 0.012}, "average_copy": {"p50": 0.012, "p95": 0.012}, "all_copies": {"p50": 0.012, "p95": 0.012}, "readings_present": 1.0}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.0, "p95": 0.001}, "average_copy": {"p50": 0.0, "p95": 0.001}, "all_copies": {"p50": 0.0, "p95": 0.001}, "readings_present": 1.0}, "reserved": {"copies": 1, "memory_gib": 0.0, "cpu_cores": 0.0, "recorded": false}},
         {"component": "packageserver", "container": "packageserver", "memory_gib": {"copies": 3, "busiest_copy": {"p50": 0.11, "p95": 0.137}, "average_copy": {"p50": 0.109, "p95": 0.136}, "all_copies": {"p50": 0.109, "p95": 0.136}, "readings_present": 1.0}, "cpu_cores": {"copies": 3, "busiest_copy": {"p50": 0.004, "p95": 0.005}, "average_copy": {"p50": 0.004, "p95": 0.005}, "all_copies": {"p50": 0.004, "p95": 0.005}, "readings_present": 1.0}, "reserved": {"copies": 3, "memory_gib": 0.244, "cpu_cores": 0.01}},
         {"component": "packageserver", "container": "socks5-proxy", "memory_gib": {"copies": 3, "busiest_copy": {"p50": 0.024, "p95": 0.024}, "average_copy": {"p50": 0.024, "p95": 0.024}, "all_copies": {"p50": 0.024, "p95": 0.024}, "readings_present": 1.0}, "cpu_cores": {"copies": 3, "busiest_copy": {"p50": 0.0, "p95": 0.001}, "average_copy": {"p50": 0.0, "p95": 0.001}, "all_copies": {"p50": 0.0, "p95": 0.001}, "readings_present": 1.0}, "reserved": {"copies": 3, "memory_gib": 0.029, "cpu_cores": 0.01}},
         {"component": "redhat-marketplace-catalog", "container": "registry", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.024, "p95": 0.039}, "average_copy": {"p50": 0.024, "p95": 0.039}, "all_copies": {"p50": 0.024, "p95": 0.039}, "readings_present": 1.0}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.009, "p95": 0.011}, "average_copy": {"p50": 0.009, "p95": 0.011}, "all_copies": {"p50": 0.009, "p95": 0.011}, "readings_present": 1.0}, "reserved": {"copies": 1, "memory_gib": 0.332, "cpu_cores": 0.01}},
@@ -739,10 +739,10 @@
       },
       "reservations": {
         "time": "2026-08-14T16:59:25.880000+00:00",
-        "counted_times": 2,
+        "series_copies": 2,
         "total": {
-          "memory_gib": 43.581,
-          "cpu_cores": 4.545
+          "memory_gib": 43.61,
+          "cpu_cores": 4.555
         },
         "left_out": [
           {
@@ -788,7 +788,7 @@
         {"component": "cloud-network-config-controller", "container": "controller", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.029, "p95": 0.029}, "average_copy": {"p50": 0.029, "p95": 0.029}, "all_copies": {"p50": 0.029, "p95": 0.029}, "readings_present": 1.0}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.001, "p95": 0.001}, "average_copy": {"p50": 0.001, "p95": 0.001}, "all_copies": {"p50": 0.001, "p95": 0.001}, "readings_present": 1.0}, "reserved": {"copies": 1, "memory_gib": 0.049, "cpu_cores": 0.01}},
         {"component": "cloud-network-config-controller", "container": "hosted-cluster-token", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.024, "p95": 0.024}, "average_copy": {"p50": 0.024, "p95": 0.024}, "all_copies": {"p50": 0.024, "p95": 0.024}, "readings_present": 1.0}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.0, "p95": 0.001}, "average_copy": {"p50": 0.0, "p95": 0.001}, "all_copies": {"p50": 0.0, "p95": 0.001}, "readings_present": 1.0}, "reserved": {"copies": 1, "memory_gib": 0.029, "cpu_cores": 0.01}},
         {"component": "cluster-api", "container": "manager", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.068, "p95": 0.069}, "average_copy": {"p50": 0.068, "p95": 0.069}, "all_copies": {"p50": 0.068, "p95": 0.069}, "readings_present": 1.0}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.075, "p95": 0.096}, "average_copy": {"p50": 0.075, "p95": 0.096}, "all_copies": {"p50": 0.075, "p95": 0.096}, "readings_present": 1.0}, "reserved": {"copies": 1, "memory_gib": 0.039, "cpu_cores": 0.01}},
-        {"component": "cluster-image-registry-operator", "container": "apiserver-token-minter", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.023, "p95": 0.023}, "average_copy": {"p50": 0.023, "p95": 0.023}, "all_copies": {"p50": 0.023, "p95": 0.023}, "readings_present": 1.0}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.0, "p95": 0.001}, "average_copy": {"p50": 0.0, "p95": 0.001}, "all_copies": {"p50": 0.0, "p95": 0.001}, "readings_present": 1.0}, "reserved": {"copies": 1, "memory_gib": 0.0, "cpu_cores": 0.0}},
+        {"component": "cluster-image-registry-operator", "container": "apiserver-token-minter", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.023, "p95": 0.023}, "average_copy": {"p50": 0.023, "p95": 0.023}, "all_copies": {"p50": 0.023, "p95": 0.023}, "readings_present": 1.0}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.0, "p95": 0.001}, "average_copy": {"p50": 0.0, "p95": 0.001}, "all_copies": {"p50": 0.0, "p95": 0.001}, "readings_present": 1.0}, "reserved": {"copies": 1, "memory_gib": 0.029, "cpu_cores": 0.01, "recorded": false, "borrowed_from": "6-node-aro-hcp"}},
         {"component": "cluster-image-registry-operator", "container": "cluster-image-registry-operator", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.053, "p95": 0.067}, "average_copy": {"p50": 0.053, "p95": 0.067}, "all_copies": {"p50": 0.053, "p95": 0.067}, "readings_present": 1.0}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.002, "p95": 0.004}, "average_copy": {"p50": 0.002, "p95": 0.004}, "all_copies": {"p50": 0.002, "p95": 0.004}, "readings_present": 1.0}, "reserved": {"copies": 1, "memory_gib": 0.049, "cpu_cores": 0.01}},
         {"component": "cluster-network-operator", "container": "client-token-minter", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.023, "p95": 0.023}, "average_copy": {"p50": 0.023, "p95": 0.023}, "all_copies": {"p50": 0.023, "p95": 0.023}, "readings_present": 1.0}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.0, "p95": 0.001}, "average_copy": {"p50": 0.0, "p95": 0.001}, "all_copies": {"p50": 0.0, "p95": 0.001}, "readings_present": 1.0}, "reserved": {"copies": 1, "memory_gib": 0.029, "cpu_cores": 0.01}},
         {"component": "cluster-network-operator", "container": "cluster-network-operator", "memory_gib": {"copies": 1, "busiest_copy": {"p50": 0.115, "p95": 0.117}, "average_copy": {"p50": 0.115, "p95": 0.117}, "all_copies": {"p50": 0.115, "p95": 0.117}, "readings_present": 1.0}, "cpu_cores": {"copies": 1, "busiest_copy": {"p50": 0.005, "p95": 0.014}, "average_copy": {"p50": 0.005, "p95": 0.014}, "all_copies": {"p50": 0.005, "p95": 0.014}, "readings_present": 1.0}, "reserved": {"copies": 1, "memory_gib": 0.098, "cpu_cores": 0.01}},
@@ -887,7 +887,7 @@
       },
       "reservations": {
         "time": "2025-10-15T22:56:39.537000+00:00",
-        "counted_times": 1,
+        "series_copies": 1,
         "total": {
           "memory_gib": 75.035,
           "cpu_cores": 4.335
@@ -1021,7 +1021,7 @@
       },
       "reservations": {
         "time": "2025-10-20T15:32:21.403000+00:00",
-        "counted_times": 1,
+        "series_copies": 1,
         "total": {
           "memory_gib": 133.035,
           "cpu_cores": 4.335
@@ -1155,7 +1155,7 @@
       },
       "reservations": {
         "time": "2025-10-23T20:01:10+00:00",
-        "counted_times": 1,
+        "series_copies": 1,
         "total": {
           "memory_gib": 133.035,
           "cpu_cores": 4.335
@@ -1289,7 +1289,7 @@
       },
       "reservations": {
         "time": "2025-10-30T20:00:55+00:00",
-        "counted_times": 1,
+        "series_copies": 1,
         "total": {
           "memory_gib": 388.035,
           "cpu_cores": 4.335

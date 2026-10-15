@@ -110,11 +110,27 @@ the numbers don't change.
    Kubernetes reserves per container. A component runs as many copies as the most any of its containers has.
 9. Separately, record what Kubernetes reserved for each container (its resource requests), which the tests
    recorded once, at the end of each run: per copy for each container (`reserved`) and in total for the run
-   (`reservations`). These come from kube-state-metrics. The 49-node dump keeps two copies of every
-   kube-state-metrics series, one per Prometheus replica, so the reservations it recorded are double the real
-   ones. The management cluster's node roles, also from kube-state-metrics but recorded without adding anything
-   up, show the two copies, so `combine_usage.py` halves them. The usage readings come from the kubelet instead
-   and aren't doubled.
+   (`reservations`). These come from kube-state-metrics, whose series reach the monitoring through the management
+   cluster's own Prometheus, which runs 2 replicas (`mgmt.prometheus.prometheusSpec.replicas` in
+   `config/config.yaml`). The 49-node dump keeps both replicas' copies of every kube-state-metrics series, so the
+   reservations it recorded are double the real ones. Its record of the management cluster's nodes
+   (`kube_node_info`, which the dumps call `mgmtNodeRoles`), also from kube-state-metrics but recorded without adding
+   anything up, shows the two copies, so `combine_usage.py` halves them. As a check, it warns unless the token
+   minters, small helper containers in every run, then reserve what HyperShift always gives them: 10m CPU and
+   30 MiB. The usage readings aren't doubled: Azure Monitor's own agent collects them, once (`cadvisor = true` in
+   `observability/prometheus/deploy/templates/ama-metrics-settings-configmap.yaml`).
+10. Kubernetes records nothing for a container that reserves nothing, and the 49-node run's query also misses
+    containers that start before the main ones (sidecars, which Kubernetes reports separately, as init
+    containers): there, the image registry operator's `apiserver-token-minter`, which reserved 10m CPU and 30 MiB
+    in the 3- and 6-node runs. So a container that was running at the end without a recorded reservation is marked
+    `"recorded": false`, and gets the reservation the newest run that recorded it had (`borrowed_from`), or 0 if no
+    run did (only `package-operator-remote-phase-manager`'s `manager`, in the runs of up to 30 nodes).
+11. A container with a reservation but no usage in the window goes under `reservations.left_out` and isn't
+    counted: in the 49-node run, `featuregate-generator`, which has no usage readings at all, so it's probably a
+    job that had finished (the dumps don't record pods' status). Kubernetes doesn't count a finished pod's
+    reservation. The other runs' query only counts pending and running pods (the
+    `cluster:namespace:pod_*:active:kube_pod_container_resource_requests` rules in
+    `observability/alerts/kubernetesControlPlane-prometheusRule.yaml`), while the 49-node run's counts every pod.
 
 ## Using the numbers
 
@@ -130,9 +146,13 @@ the numbers don't change.
   for the test clusters, as opposed to what they used. On OpenShift 4.19, every run's control plane reserved 4.335
   cores whatever its size, while its memory followed its t-shirt size: 43.3 GiB for small, 75.0 for medium, 133.0
   for large and 388.0 for xxlarge, as `cluster.clustersizingconfiguration.yaml` sets memory for each size, but not
-  CPU. The 3- and 6-node runs (OpenShift 4.20) reserved 4.295 cores and 43.1 GiB, and the 49-node run (4.22) 4.545
-  cores and 43.6 GiB. A container that reserves nothing has 0. A finished job's container still has a reservation
-  but no usage; it's listed under `reservations.left_out` and not counted, as Kubernetes doesn't count it either.
+  CPU. The 3- and 6-node runs (OpenShift 4.20) reserved 4.295 cores and 43.1 GiB, and the 49-node run (4.22) 4.555
+  cores and 43.6 GiB.
+- **Two sizing settings that don't take effect:** `cluster.clustersizingconfiguration.yaml` also sets the memory of
+  `ovnkube-control-plane` (for every size) and `multus-admission-controller` (for large and up), but no run got
+  those settings: whatever its size, every run reserved 200 MiB per copy for the first and 50 MiB for the second,
+  so for these two the file doesn't say what's reserved. Why isn't known. On big clusters, both use far more than
+  that: at 500 nodes, about 1.26 and 1.25 GiB per copy (p95).
 - **Filled-in readings:** `total.filled_in` says how much of a total was filled in. It's about a quarter for the
   3- and 6-node CPU and almost nothing elsewhere.
 
@@ -264,3 +284,8 @@ Each item fixes a problem these runs had:
     minutes, and the test tool sends all its requests through one client, so they most likely all reach one API
     server copy, which makes it much busier than production's many clients would. The scheduling simulator's
     `observed` tool (`../scheduling-simulator/observed/`) collects this kind of data.
+11. **Every container's reservation, recorded the same way in every run.** The 49-node run's query missed
+    containers that start before the main ones (sidecars, which Kubernetes reports separately, in
+    `kube_pod_init_container_resource_requests`) and counted finished pods, which the other runs' query leaves out.
+    Recording both kinds of container and each pod's status (`kube_pod_status_phase`), with the same query in
+    every run, would show every reservation and which pods were running.
