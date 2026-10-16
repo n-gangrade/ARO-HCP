@@ -22,11 +22,12 @@ kube-state-metrics, whose series the monitoring can keep more than one copy of (
 keeps one per Prometheus replica), which multiplies their recorded sums. The management cluster's
 node info (kube_node_info), also from kube-state-metrics but recorded without adding anything up,
 shows how many copies it kept, and the reservations are divided by that. As a check, the token
-minters, small helper containers in every run, should then reserve what HyperShift always gives
-them; it warns if they don't. Kubernetes records nothing for a container that reserves nothing,
-and the 49-node run's query also misses containers that start before the main ones (sidecars), so
-a container that was running without a recorded reservation gets the one the newest run that
-recorded it had, or 0 if no run did.
+minters, small helper containers in every run, should then reserve 10m CPU and 30 MiB, as every
+token minter did in every run; it warns if they don't. kube-state-metrics records nothing for a
+container that reserves nothing, and reports containers that start before the main ones (sidecars)
+separately, as init containers, which none of the runs' queries include. So a container that was
+running without a recorded reservation gets the one the newest run that recorded it had, or 0 if
+no run did.
 The file is meant to be committed, so it leaves out cluster IDs.
 
 Each run also gets its trust note, copied from a hand-written notes file (run-notes.json next
@@ -68,8 +69,8 @@ RESERVATION_METRICS = [("memory_gib", MEMORY_RESERVED_METRIC, BYTES_TO_GIB),
 NODE_INFO_METRIC = "mgmtNodeRoles"
 # A container without a recorded reservation counts as running at the end if it has a reading this close to it.
 RUNNING_AT_END = dt.timedelta(minutes=2)
-# What HyperShift reserves for each token minter, 30 MiB and 10m CPU
-# (support/controlplane-component/token-minter-container.go), to check the reservations against
+# What every token minter reserved in every run, 30 MiB and 10m CPU, to check the reservations against. It's also
+# what HyperShift gives the token minters it adds (support/controlplane-component/token-minter-container.go).
 TOKEN_MINTER_RESERVED = {"memory_gib": 30 / 1024, "cpu_cores": 0.01}
 FIELDS = {
     "total_nodes": "the test cluster's nodes, infra nodes as well as workers; HyperShift picks a cluster's t-shirt "
@@ -105,8 +106,8 @@ FIELDS = {
                     "reservations or they can't be corrected",
     "reserved": "what Kubernetes reserved for each copy (its resource requests), as memory in GiB and CPU in cores, "
                 "and how many copies the container had, at the end of the run; null when none of its copies were "
-                "left by then. Kubernetes records nothing for a container that reserves nothing, and the 49-node "
-                "run's query also misses containers that start before the main ones (sidecars), so a container "
+                "left by then. kube-state-metrics records nothing for a container that reserves nothing, and none of "
+                "the runs' queries include containers that start before the main ones (sidecars), so a container "
                 "that was running without a recorded reservation has recorded: false, and gets the reservation the "
                 "newest run that recorded it had (borrowed_from), or 0 if no run did",
 }
@@ -160,6 +161,15 @@ def by_percentile(values):
     return {f"p{p:g}": None if v is None else round(float(v), DECIMALS) for p, v in zip(PERCENTILES, values)}
 
 
+def total_nodes(job):
+    """The test cluster's nodes, infra nodes as well as workers: totalNodes, or, in a dump without it, the workers and
+    infra nodes added up."""
+    if job.get("totalNodes"):
+        return job["totalNodes"]
+    workers = job.get("workerNodesCount")
+    return None if workers is None else workers + (job.get("infraNodesCount") or 0)
+
+
 def read_reservations(path, cluster_id, run_name):
     """(moment, series_copies, reserved), where reserved[(namespace, pod, container)] maps "memory_gib" and
     "cpu_cores" to what Kubernetes reserved for that copy of one of the tested cluster's containers at `moment`,
@@ -170,6 +180,7 @@ def read_reservations(path, cluster_id, run_name):
     names = {metric: (name, scale) for name, metric, scale in RESERVATION_METRICS}
     recorded = defaultdict(dict)  # {time: {(namespace, pod, container, name): value}}
     node_info = defaultdict(set)  # {(time, node): {label set}}, so repeated records count once
+    skipped = 0                   # records that can't be read or have no time
     with opener(path) as f:
         for line in f:
             if (MEMORY_RESERVED_METRIC not in line and CPU_RESERVED_METRIC not in line
@@ -178,17 +189,24 @@ def read_reservations(path, cluster_id, run_name):
             try:
                 record = json.loads(line)
             except ValueError:
+                skipped += 1
                 continue
             metric, labels = record.get("metricName"), record.get("labels", {})
+            if metric != NODE_INFO_METRIC and metric not in names:
+                continue
             when = parse_time(record.get("timestamp"))
             if when is None:
+                skipped += 1
                 continue
             if metric == NODE_INFO_METRIC:
                 node_info[(when, labels.get("node"))].add(frozenset(labels.items()))
-            elif metric in names and cluster_id in labels.get("namespace", ""):
+            elif cluster_id in labels.get("namespace", ""):
                 name, scale = names[metric]
                 key = (labels["namespace"], labels.get("pod", ""), labels.get("container", ""), name)
                 recorded[when][key] = record["value"] * scale
+    if skipped:
+        print(f"warning: {run_name}: skipped {skipped} reservation or node info records that can't be read or have no "
+              "time, so its reservations may be incomplete", file=sys.stderr)
     if not recorded:
         print(f"warning: {run_name} has no reservations for the hosted cluster under test", file=sys.stderr)
         return None
@@ -330,7 +348,7 @@ def summarize_run(path):
     run = {
         "run": os.path.basename(path).removesuffix(".gz").removesuffix(".ndjson"),
         "worker_nodes": job.get("workerNodesCount"),
-        "total_nodes": job.get("totalNodes") or job.get("workerNodesCount"),
+        "total_nodes": total_nodes(job),
         "ocp_version": job.get("ocpVersion"),
         "date": (job.get("timestamp") or "")[:10] or None,
         "churn_phase": windows[CPU_METRIC][0] == "churn phase",

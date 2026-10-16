@@ -50,7 +50,7 @@ your Python (for example `PY=../scheduling-simulator/venv/bin/python`):
 
        $PY combine_usage.py ~/Downloads/aro-hcp-raw-usage/*.ndjson*
 
-4. Rebuild the pods per t-shirt size from it and production's sizing file. It warns if its checks fail:
+4. Rebuild the pods per t-shirt size from it and HyperShift's sizing file. It stops or warns if its checks fail:
 
        $PY size_pods.py
 
@@ -117,15 +117,19 @@ the numbers don't change.
    reservations it recorded are double the real ones. Its record of the management cluster's nodes
    (`kube_node_info`, which the dumps call `mgmtNodeRoles`), also from kube-state-metrics but recorded without adding
    anything up, shows the two copies, so `combine_usage.py` halves them. As a check, it warns unless the token
-   minters, small helper containers in every run, then reserve what HyperShift always gives them: 10m CPU and
-   30 MiB. The usage readings aren't doubled: Azure Monitor's own agent collects them, once (`cadvisor = true` in
+   minters, small helper containers in every run, then reserve 10m CPU and 30 MiB, as every token minter did in
+   every run (and as HyperShift gives the token minters it adds, in its
+   `support/controlplane-component/token-minter-container.go`). The usage readings aren't doubled: Azure Monitor's
+   own agent collects them, once (`cadvisor = true` in
    `observability/prometheus/deploy/templates/ama-metrics-settings-configmap.yaml`).
-10. Kubernetes records nothing for a container that reserves nothing, and the 49-node run's query also misses
-    containers that start before the main ones (sidecars, which Kubernetes reports separately, as init
-    containers): there, the image registry operator's `apiserver-token-minter`, which reserved 10m CPU and 30 MiB
-    in the 3- and 6-node runs. So a container that was running at the end without a recorded reservation is marked
-    `"recorded": false`, and gets the reservation the newest run that recorded it had (`borrowed_from`), or 0 if no
-    run did (only `package-operator-remote-phase-manager`'s `manager`, in the runs of up to 30 nodes).
+10. kube-state-metrics records nothing for a container that reserves nothing, and reports containers that start
+    before the main ones (sidecars) separately, as init containers (`kube_pod_init_container_resource_requests`),
+    which none of the runs' queries include. HyperShift has started running token minters as sidecars: in the
+    49-node run (OpenShift 4.22), the image registry operator's `apiserver-token-minter` was running but has no
+    recorded reservation, while the 3- and 6-node runs (4.20) recorded 10m CPU and 30 MiB for it. So a container
+    that was running at the end without a recorded reservation is marked `"recorded": false`, and gets the
+    reservation the newest run that recorded it had (`borrowed_from`), or 0 if no run did (only
+    `package-operator-remote-phase-manager`'s `manager`, in the runs of up to 30 nodes).
 11. A container with a reservation but no usage in the window goes under `reservations.left_out` and isn't
     counted: in the 49-node run, `featuregate-generator`, which has no usage readings at all, so it's probably a
     job that had finished (the dumps don't record pods' status). Kubernetes doesn't count a finished pod's
@@ -146,44 +150,55 @@ the numbers don't change.
 - **Today's reservations:** `reserved` (per copy) and `reservations.total` (per run) are what production reserved
   for the test clusters, as opposed to what they used. On OpenShift 4.19, every run's control plane reserved 4.335
   cores whatever its size, while its memory followed its t-shirt size: 43.3 GiB for small, 75.0 for medium, 133.0
-  for large and 388.0 for xxlarge, as `cluster.clustersizingconfiguration.yaml` sets memory for each size, but not
-  CPU. The 3- and 6-node runs (OpenShift 4.20) reserved 4.295 cores and 43.1 GiB, and the 49-node run (4.22) 4.555
-  cores and 43.6 GiB.
+  for large and 388.0 for xxlarge, as `cluster.clustersizingconfiguration.yaml` sets memory for each of these sizes,
+  but not CPU. The 3- and 6-node runs (OpenShift 4.20) reserved 4.295 cores and 43.1 GiB, and the 49-node run (4.22)
+  4.555 cores and 43.6 GiB.
 - **Two sizing settings that don't take effect:** `cluster.clustersizingconfiguration.yaml` also sets the memory of
   `ovnkube-control-plane` (for every size) and `multus-admission-controller` (for large and up), but no run got
   those settings: whatever its size, every run reserved 200 MiB per copy for the first and 50 MiB for the second,
-  so for these two the file doesn't say what's reserved. Why isn't known. On big clusters, both use far more than
-  that: at 500 nodes, about 1.26 and 1.25 GiB per copy (p95).
+  so for these two the file doesn't say what's reserved. The network operator, not HyperShift, creates these two
+  pods, and HyperShift applies its resource-request overrides only to the pods it creates (`applyRequestsOverrides`
+  in its `support/controlplane-component/defaults.go`); its own tests have a TODO to set requests for networking
+  pods once that's possible (`test/e2e/util/reqserving/setup.go`). On big clusters, both use far more than they
+  reserve: at 500 nodes, about 1.26 and 1.25 GiB per copy (p95).
 - **Filled-in readings:** `total.filled_in` says how much of a total was filled in. It's about a quarter for the
   3- and 6-node CPU and almost nothing elsewhere.
 
 ## Pods per t-shirt size
 
-`size_pods.py` writes `size-pods.json`: for each of production's t-shirt sizes, every pod a hosted cluster runs, how
-many copies, and what one copy needs (CPU, memory and SWIFT NICs), in two versions: what production reserves for it
-today (`reserved`) and what it uses (`used`). It's the input for simulating how a customer's clusters pack onto
-management-cluster machines.
+`size_pods.py` writes `size-pods.json`: for each t-shirt size, every pod a hosted cluster runs, how many copies, and
+what one copy needs (CPU, memory and SWIFT NICs), in two versions: what it reserves (`reserved`) and what it uses
+(`used`). It's the input for simulating how a customer's clusters pack onto management-cluster machines.
 
-- **Sizes** are production's, from `hypershiftoperator/deploy/templates/cluster.clustersizingconfiguration.yaml`
-  (the sizing file): small (0 to 60 nodes), medium (61 to 120), large (121 to 252), xlarge (253 to 360) and xxlarge
-  (361 and up). HyperShift counts all of a cluster's nodes, infra nodes as well as workers, and every test cluster
-  from 12 nodes up had 2 infra nodes besides its workers, so the 60-node run counts as medium and the 120-node run
-  as large.
+- **Sizes** are the ones stage and prod use, from
+  `hypershiftoperator/deploy/templates/cluster.clustersizingconfiguration.yaml` (the sizing file's `{{ else }}` part,
+  as they don't set `limitClusterSizes`): small (0 to 60 nodes), medium (61 to 120), large (121 to 252), xlarge (253
+  to 360) and xxlarge (361 and up). HyperShift counts all of a cluster's nodes, infra nodes as well as workers, and
+  every test cluster from 12 nodes up had 2 infra nodes besides its workers, so the 60-node run counts as medium and
+  the 120-node run as large.
 - **Reserved** pods come from the newest test run with reservations, the 49-node run (a small cluster on OpenShift
-  4.22, from August 2026), as its pods are the closest to today's. For every other size, each container the sizing
-  file sets memory for gets that size's setting instead of small's. So every size has numbers without a test run of
-  its own, xlarge included: one cluster reserves 43.6 GiB if it's small, 75.3 if medium, 133.3 if large, 271.3 if
-  xlarge and 388.3 if xxlarge, and 4.555 cores whatever its size, as the file sets memory but not CPU.
+  4.22, from August 2026), as its pods are the closest to today's. So they're what a cluster on OpenShift 4.22
+  reserves: the test clusters on other versions reserved a little less CPU (4.335 cores on 4.19 and 4.295 on 4.20,
+  against 4.555), and SREs can move a cluster to a bigger size than its nodes call for
+  (`docs/ops/override-cluster-size.md`). For every other size, each container the sizing file sets memory for gets
+  that size's setting instead of small's. So every size has numbers without a test run of its own, xlarge
+  included: one cluster reserves 43.6 GiB if it's small, 75.3 if medium, 133.3 if large, 271.3 if xlarge and 388.3
+  if xxlarge, and 4.555 cores whatever its size, as the file sets memory for these sizes but not CPU.
   - The file's settings for `ovnkube-control-plane` and `multus-admission-controller` are left out
-    (`SETTINGS_LEFT_OUT`), as no test run got them (see "Today's reservations").
+    (`SETTINGS_LEFT_OUT`), as no test run got them (see "Two sizing settings that don't take effect").
   - The file also sets memory for the cluster autoscaler, 2 to 12 GiB a copy from medium up, but no test cluster
-    ran one, so it isn't included; `not_included` lists it for each size. On the 49-node run's management cluster,
-    1 of the 12 hosted clusters ran one.
+    ran one, so it isn't included (`NOT_TESTED`). `not_included` lists it for each size, with 1 copy and the
+    file's setting, or null for small, where the file sets none: on the 49-node run's management cluster, 1 of the
+    12 hosted clusters ran one, with 1 copy.
+  - If the run had no router, the reserved pods get the newest one recorded (`reserved_from.router_from`). With
+    none, the script stops, as the router's copies decide each cluster's SWIFT NICs.
   - Two checks warn if this way of working them out stops holding: every test run should have got its size's
     settings, and each run, worked out the same way from another small run on its OpenShift version, should come
     out as recorded. Both hold: worked out from a 12-node run, for example, the 60-, 120-, 250- and 500-node runs
-    come out exactly as recorded. The 49-node run is the only one on its OpenShift version, so the second check
-    can't cover it.
+    come out exactly as recorded. But the 49-node run is the only one on its OpenShift version, so the second check
+    can't cover it, and no run is xlarge, so neither covers xlarge's settings. So the script also stops if the
+    sizing file sets anything for a container the 49-node run doesn't have, unless `NOT_TESTED` lists it, which
+    catches a misspelled name in any size.
 - **Used** pods need their containers' p95 of all copies' readings, added up, so the numbers are what the pods use:
   what clusters could reserve if their reservations matched their use. Each size uses the largest test cluster
   within its range, preferring good trust, as the largest is closest to the size's biggest clusters: small uses the
@@ -192,14 +207,19 @@ management-cluster machines.
   `size_pods.py` picks a different run for a size. Every cluster gets a router, measured in the 49-node run, the
   only one with a router.
 - **In both,** each router copy needs one SWIFT NIC, the login components the scheduling simulator adds aren't
-  included, as production's clusters don't run them, and a component with more than one copy runs one per
-  availability zone (`one_per_zone`), as production requires.
+  included, as production's clusters don't run them, and a component with more than one copy runs one copy per
+  availability zone (`one_per_zone`). HyperShift requires that on Azure for the components it spreads across zones
+  (`setMultizoneSpread` in its `support/controlplane-component/defaults.go`), and on the 49-node run's management
+  cluster, every multi-copy component of all 12 hosted clusters had its copies on different machines in different
+  zones, apart from one `capi-provider`, which has 1 copy in every test run. The script stops if no run had a router,
+  or if a component has more copies than the 3 zones.
 
 Reservations and use differ a lot. For memory, clusters reserve far more than they use: a small test cluster
 reserves about 43 GiB, while at busy moments (the p95 of its `total` in `container-usage.json`) the whole cluster
-used 9.5 to 28.5 GiB. For CPU, bigger clusters use more than they reserve: every size reserves about 4.3 to 4.6
-cores, while at busy moments the 120- and 250-node clusters used 5.9 and 11.7 cores, and the 500-node one 26.1
-(though that run has low trust), which works only while their machines have CPU to spare.
+used 9.5 to 28.5 GiB. For CPU, clusters of every size can use more than they reserve, which works only while their
+machines have CPU to spare: the 49-node cluster used 5.3 cores typically (p50) and 6.9 at busy moments (p95),
+against 4.555 reserved, and at busy moments the 30- and 60-node clusters used 4.6 and 4.4 cores and the 120- and
+250-node ones 5.9 and 11.7, against about 4.3 reserved, and the 500-node one 26.1 (though that run has low trust).
 
 ## Cores per cluster size
 
@@ -274,6 +294,13 @@ for now, used only to group the rows; costs in dollars aren't included yet. To c
 - The test clusters from 12 nodes up had 2 infra nodes besides their workers (the 3- and 6-node ones had none), which
   HyperShift counts when it picks a t-shirt size, so the 60-node run was a medium cluster and the 120-node run a
   large one, each at the bottom of its size's range.
+- Each hosted cluster also runs ACM agent pods outside its control plane's namespace, which the tests' queries don't
+  cover: on the 49-node run's management cluster, 11 of the 12 hosted clusters had a `klusterlet-*` namespace of
+  their own with 5 agent pods (4 in one), using about 0.15 to 0.2 GiB per cluster. ACM's settings
+  (`acm/deploy/helm/multicluster-engine-config/templates/global.klusterletconfig.yaml` and
+  `addon-hosted-config.addondeployconfig.yaml`) place them on the infra machines, where they ran, apart from 2
+  containers of one cluster. So they take no room on the machines the control planes run on, but add to the infra
+  machines with every cluster; what they reserve isn't known.
 
 ## Data we'd want from future test runs
 
@@ -311,8 +338,10 @@ Each item fixes a problem these runs had:
     minutes, and the test tool sends all its requests through one client, so they most likely all reach one API
     server copy, which makes it much busier than production's many clients would. The scheduling simulator's
     `observed` tool (`../scheduling-simulator/observed/`) collects this kind of data.
-11. **Every container's reservation, recorded the same way in every run.** The 49-node run's query missed
-    containers that start before the main ones (sidecars, which Kubernetes reports separately, in
-    `kube_pod_init_container_resource_requests`) and counted finished pods, which the other runs' query leaves out.
-    Recording both kinds of container and each pod's status (`kube_pod_status_phase`), with the same query in
-    every run, would show every reservation and which pods were running.
+11. **Every container's reservation, recorded the same way in every run.** Every run's query missed containers
+    that start before the main ones (sidecars, which kube-state-metrics reports separately, in
+    `kube_pod_init_container_resource_requests`), and the 49-node run's counted finished pods, which the other runs'
+    query leaves out. Recording both kinds of container and each pod's status (`kube_pod_status_phase`), with the
+    same query in every run, would show every reservation and which pods were running.
+12. **The ACM agents' reservations and use:** each hosted cluster's `klusterlet-*` namespace, as well as its control
+    plane's, to show what every cluster adds to the infra machines.

@@ -1,10 +1,11 @@
 {
-  "description": "The pods one hosted cluster of each t-shirt size runs, written by hack/hcp-scale-analysis/size_pods.py from container-usage.json and production's sizing file: what one copy of each component reserves today (reserved) and what it uses (used, the sum of its containers' p95 of all copies' readings).",
+  "description": "The pods one hosted cluster of each t-shirt size runs, written by hack/hcp-scale-analysis/size_pods.py from container-usage.json and HyperShift's sizing file: what one copy of each component reserves in a cluster on reserved_from's OpenShift version (reserved), and what it uses (used, the sum of its containers' p95 of all copies' readings).",
   "reserved_from": {
     "run": "49-node-hcp-raw",
     "size": "small",
     "ocp_version": "4.22.8",
-    "date": "2026-08-14"
+    "date": "2026-08-14",
+    "router_from": null
   },
   "settings_left_out": [
     "multus-admission-controller / multus-admission-controller",
@@ -12,17 +13,17 @@
   ],
   "fields": {
     "reserved_from": "the test run the reserved pods come from, the newest one with reservations",
-    "settings_left_out": "the sizing file's settings the reserved pods leave out, as no test run got them",
+    "settings_left_out": "the sizing file's settings the reserved pods leave out, as no test run got them: the network operator, not HyperShift, creates these pods",
     "nodes_from": "the size's lowest total node count, infra nodes as well as workers",
     "nodes_to": "the size's highest total node count; null means no upper limit",
-    "reserved": "what one copy of each component reserves today: its containers' resource requests in the reserved_from run, with the sizing file's settings for this size",
-    "not_included": "the sizing file's settings for this size, per copy, for containers the reserved_from run doesn't have, so the reserved pods don't include them",
+    "reserved": "what one copy of each component reserves in a cluster on reserved_from's OpenShift version: its containers' resource requests in that run, with the sizing file's settings for this size",
+    "not_included": "containers no test run had, so the reserved pods don't include them: how many copies they run, and the sizing file's settings for this size, per copy; null where it sets none, as what they reserve then isn't known",
     "used": "what one copy of each component uses: its containers' p95 of all copies' readings, added up",
     "run": "the test run the used pods come from",
     "run_total_nodes": "that run's total node count",
     "trust": "how much to trust that run: good, caveats or low (see its notes in container-usage.json)",
     "borrowed": "true when no test run falls within the size, so it uses the next larger size's run",
-    "router_from": "the test run the router's numbers come from, if not the size's own run",
+    "router_from": "the test run the router's numbers come from, if not the run the other pods come from",
     "totals": "one cluster's pods, CPU in cores, memory in GiB and SWIFT NICs, with every copy added up",
     "copies": "how many copies (pods) of the component one cluster runs",
     "cpu_cores": "CPU one copy reserves or uses, in cores",
@@ -42,7 +43,15 @@
           "memory_gib": 43.615,
           "swift_nics": 3
         },
-        "not_included": [],
+        "not_included": [
+          {
+            "component": "cluster-autoscaler",
+            "container": "cluster-autoscaler",
+            "copies": 1,
+            "memory_gib": null,
+            "cpu_cores": null
+          }
+        ],
         "pods": [
           {"component": "kube-apiserver", "copies": 3, "cpu_cores": 0.395, "memory_gib": 8.103, "swift_nics": 0, "one_per_zone": true},
           {"component": "etcd", "copies": 3, "cpu_cores": 0.36, "memory_gib": 1.293, "swift_nics": 0, "one_per_zone": true},
@@ -166,7 +175,9 @@
           {
             "component": "cluster-autoscaler",
             "container": "cluster-autoscaler",
-            "memory_gib": 2.0
+            "copies": 1,
+            "memory_gib": 2.0,
+            "cpu_cores": null
           }
         ],
         "pods": [
@@ -291,7 +302,9 @@
           {
             "component": "cluster-autoscaler",
             "container": "cluster-autoscaler",
-            "memory_gib": 4.0
+            "copies": 1,
+            "memory_gib": 4.0,
+            "cpu_cores": null
           }
         ],
         "pods": [
@@ -416,7 +429,9 @@
           {
             "component": "cluster-autoscaler",
             "container": "cluster-autoscaler",
-            "memory_gib": 6.0
+            "copies": 1,
+            "memory_gib": 6.0,
+            "cpu_cores": null
           }
         ],
         "pods": [
@@ -541,7 +556,9 @@
           {
             "component": "cluster-autoscaler",
             "container": "cluster-autoscaler",
-            "memory_gib": 12.0
+            "copies": 1,
+            "memory_gib": 12.0,
+            "cpu_cores": null
           }
         ],
         "pods": [

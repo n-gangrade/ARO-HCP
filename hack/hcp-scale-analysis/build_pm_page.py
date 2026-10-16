@@ -76,7 +76,7 @@ def assumptions(cores, profiles):
     return [
         usage,
         "Own cores: what one cluster's own control-plane pods reserve, including a router and two login components "
-        "that every cluster runs.",
+        "that the scheduling simulator adds to every cluster, although production's clusters don't run them.",
         "Shared cores: the cluster's share of what no single cluster owns: system reservations and agents on every "
         "machine, spare room for upgrades and a zone failure, placeholder slots for new clusters, and room left unused "
         f"when machines fill up on one resource first. It comes from the scheduling simulator packing a sample mix of "
