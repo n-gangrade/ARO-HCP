@@ -12,14 +12,14 @@ hosted-cluster size, plus a note on how much to trust each size.
 | `combine_usage.py` | Works out per-container usage for many runs, and what Kubernetes reserved for each container, and writes `container-usage.json` |
 | `component_requests.py` | Prints what one copy of each component (pod) needs for each run, from `container-usage.json` |
 | `simulator_profiles.py` | Writes those numbers for each size in the scheduling simulator's input format, into `simulator-profiles.json` |
-| `size_pods.py` | Writes the pods one cluster of each t-shirt size runs, with what each copy needs, into `size-pods.json` |
+| `size_pods.py` | Writes the pods one cluster of each t-shirt size runs, with what each copy reserves today and what it uses, into `size-pods.json` |
 | `size_cores.py` | Works out the cores one cluster of each size takes up on the management-cluster machines, with the scheduling simulator, into `size-cores.json` |
 | `build_pm_page.py` | Builds the PM page, `pm-page.html`, from `pm-page-template.html` and `size-cores.json` |
 | `pm-page-template.html` | The PM page's layout and code, without the numbers |
 | `run-notes.json` | Hand-written trust note for each run (`good`, `caveats` or `low`, and why) |
 | `container-usage.json` | Generated: per-container usage of every run and what Kubernetes reserved, with the run's trust note. The input for comparing sizes and for `component_requests.py` and `simulator_profiles.py` |
 | `simulator-profiles.json` | Generated: what one copy of each component needs for each size, for the scheduling simulator |
-| `size-pods.json` | Generated: the pods one cluster of each t-shirt size runs, for simulating how clusters pack onto machines |
+| `size-pods.json` | Generated: the pods one cluster of each t-shirt size runs, with what each copy reserves today and what it uses, for simulating how clusters pack onto machines |
 | `size-cores.json` | Generated: one cluster's own, shared and total cores for each size. The input for the PM page |
 | `pm-page.html` | Generated: the PM page, a single self-contained file that estimates the cores to request per region and customer |
 | `graphs/` | Generated: CPU and memory graphs and a `summary.json` for every run |
@@ -32,7 +32,8 @@ counts the duplicate records in the 250- and 500-node dumps twice.
 
 Python 3.11 or newer (older versions can't parse some of the dumps' timestamps), with numpy and matplotlib. For
 example, the scheduling simulator's virtual environment (`../scheduling-simulator/venv`) with matplotlib added.
-`size_cores.py` also needs the scheduling simulator's own packages, which that environment has.
+`size_pods.py` also needs PyYAML, and `size_cores.py` the scheduling simulator's own packages, which that environment
+has.
 
 ## Updating the numbers
 
@@ -49,7 +50,7 @@ your Python (for example `PY=../scheduling-simulator/venv/bin/python`):
 
        $PY combine_usage.py ~/Downloads/aro-hcp-raw-usage/*.ndjson*
 
-4. Rebuild the pods per t-shirt size from it:
+4. Rebuild the pods per t-shirt size from it and production's sizing file. It warns if its checks fail:
 
        $PY size_pods.py
 
@@ -159,22 +160,46 @@ the numbers don't change.
 ## Pods per t-shirt size
 
 `size_pods.py` writes `size-pods.json`: for each of production's t-shirt sizes, every pod a hosted cluster runs, how
-many copies, and what one copy needs (CPU, memory and SWIFT NICs). It's the input for simulating how a customer's
-clusters pack onto management-cluster machines.
+many copies, and what one copy needs (CPU, memory and SWIFT NICs), in two versions: what production reserves for it
+today (`reserved`) and what it uses (`used`). It's the input for simulating how a customer's clusters pack onto
+management-cluster machines.
 
-- **Sizes** are production's, from `hypershiftoperator/deploy/templates/cluster.clustersizingconfiguration.yaml`:
-  small (0 to 60 nodes), medium (61 to 120), large (121 to 252), xlarge (253 to 360) and xxlarge (361 and up).
-  HyperShift counts all of a cluster's nodes, infra nodes as well as workers, and each test cluster had 2 infra nodes
-  besides its workers, so the 60-node run counts as medium and the 120-node run as large.
-- **Each size uses the largest test cluster within its range**, preferring good trust, as the largest is closest to
-  the size's biggest clusters: small uses the 30-node run (32 nodes in total), medium the 60-node run (62), large the
-  250-node run (252) and xxlarge the 500-node run. No run falls within xlarge, so it borrows xxlarge's run and is
-  marked as such. `CHOSEN_RUNS` in `size_pods.py` picks a different run for a size.
-- **Pods:** one copy needs its containers' p95 of all copies' readings, added up, so the numbers are what the pods
-  use, not what production reserves for them today. Every cluster gets a router, measured in the 49-node run, the
-  only one with a router, and each router copy needs one SWIFT NIC. The login components the scheduling simulator
-  adds aren't included, as production's clusters don't run them. A component with more than one copy runs one per
+- **Sizes** are production's, from `hypershiftoperator/deploy/templates/cluster.clustersizingconfiguration.yaml`
+  (the sizing file): small (0 to 60 nodes), medium (61 to 120), large (121 to 252), xlarge (253 to 360) and xxlarge
+  (361 and up). HyperShift counts all of a cluster's nodes, infra nodes as well as workers, and every test cluster
+  from 12 nodes up had 2 infra nodes besides its workers, so the 60-node run counts as medium and the 120-node run
+  as large.
+- **Reserved** pods come from the newest test run with reservations, the 49-node run (a small cluster on OpenShift
+  4.22, from August 2026), as its pods are the closest to today's. For every other size, each container the sizing
+  file sets memory for gets that size's setting instead of small's. So every size has numbers without a test run of
+  its own, xlarge included: one cluster reserves 43.6 GiB if it's small, 75.3 if medium, 133.3 if large, 271.3 if
+  xlarge and 388.3 if xxlarge, and 4.555 cores whatever its size, as the file sets memory but not CPU.
+  - The file's settings for `ovnkube-control-plane` and `multus-admission-controller` are left out
+    (`SETTINGS_LEFT_OUT`), as no test run got them (see "Today's reservations").
+  - The file also sets memory for the cluster autoscaler, 2 to 12 GiB a copy from medium up, but no test cluster
+    ran one, so it isn't included; `not_included` lists it for each size. On the 49-node run's management cluster,
+    1 of the 12 hosted clusters ran one.
+  - Two checks warn if this way of working them out stops holding: every test run should have got its size's
+    settings, and each run, worked out the same way from another small run on its OpenShift version, should come
+    out as recorded. Both hold: worked out from a 12-node run, for example, the 60-, 120-, 250- and 500-node runs
+    come out exactly as recorded. The 49-node run is the only one on its OpenShift version, so the second check
+    can't cover it.
+- **Used** pods need their containers' p95 of all copies' readings, added up, so the numbers are what the pods use:
+  what clusters could reserve if their reservations matched their use. Each size uses the largest test cluster
+  within its range, preferring good trust, as the largest is closest to the size's biggest clusters: small uses the
+  30-node run (32 nodes in total), medium the 60-node run (62), large the 250-node run (252) and xxlarge the
+  500-node run. No run falls within xlarge, so it borrows xxlarge's run and is marked as such. `CHOSEN_RUNS` in
+  `size_pods.py` picks a different run for a size. Every cluster gets a router, measured in the 49-node run, the
+  only one with a router.
+- **In both,** each router copy needs one SWIFT NIC, the login components the scheduling simulator adds aren't
+  included, as production's clusters don't run them, and a component with more than one copy runs one per
   availability zone (`one_per_zone`), as production requires.
+
+Reservations and use differ a lot. For memory, clusters reserve far more than they use: a small test cluster
+reserves about 43 GiB, while at busy moments (the p95 of its `total` in `container-usage.json`) the whole cluster
+used 9.5 to 28.5 GiB. For CPU, bigger clusters use more than they reserve: every size reserves about 4.3 to 4.6
+cores, while at busy moments the 120- and 250-node clusters used 5.9 and 11.7 cores, and the 500-node one 26.1
+(though that run has low trust), which works only while their machines have CPU to spare.
 
 ## Cores per cluster size
 
@@ -246,8 +271,9 @@ for now, used only to group the rows; costs in dollars aren't included yet. To c
   under 24 GiB, the soft memory limit (GOMEMLIMIT) production sets for large clusters (`kasGoMemLimit` in
   `hypershiftoperator/deploy/templates/cluster.clustersizingconfiguration.yaml`), so its memory numbers depend on
   today's limit.
-- The test clusters had 2 infra nodes besides their workers, which HyperShift counts when it picks a t-shirt size, so
-  the 60-node run was a medium cluster and the 120-node run a large one, each at the bottom of its size's range.
+- The test clusters from 12 nodes up had 2 infra nodes besides their workers (the 3- and 6-node ones had none), which
+  HyperShift counts when it picks a t-shirt size, so the 60-node run was a medium cluster and the 120-node run a
+  large one, each at the bottom of its size's range.
 
 ## Data we'd want from future test runs
 
@@ -267,7 +293,8 @@ Each item fixes a problem these runs had:
    bottom of medium and large instead of the top of small and medium; there's no run for xlarge (253 to 360 nodes),
    and the only run for xxlarge (500 nodes) has no churn phase.
 5. **Clusters set up like production's,** with a router in every run. Only the 49-node run had one, so its router
-   numbers stand in for every size.
+   numbers stand in for every size. Some runs with autoscaling would also show what the cluster autoscaler reserves
+   and uses, as no run had one.
 6. **Clean dumps:** each reading once (the 250- and 500-node dumps repeat 60,397 and 30,417 readings), one copy of
    each series (the 49-node dump keeps two of every kube-state-metrics series, one per Prometheus replica, which
    doubles its reservations), no missing readings (the 3- and 6-node dumps miss about a quarter of their CPU
