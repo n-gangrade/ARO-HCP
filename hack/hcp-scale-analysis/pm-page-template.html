@@ -40,6 +40,7 @@
   <p class="notice" id="placeholder-banner" hidden>Placeholder settings: these numbers use the size of a test
     management cluster, not production's. For real quota requests, use a copy of this page built with production's
     settings.</p>
+  <p class="callout" id="settings-source" hidden></p>
 </header>
 
 <main>
@@ -311,12 +312,14 @@
 
   function showSettings(settings) {
     const d = DATA.defaults;
+    const sizeUnchanged = settings.machinesPerZone === d.machines_per_zone && settings.otherCores === d.other_cores;
     // While the management cluster's machines are the build's placeholders, the numbers aren't production's.
-    const placeholders = d.placeholders && settings.machinesPerZone === d.machines_per_zone &&
-                         settings.otherCores === d.other_cores;
-    const changed = settings.machinesPerZone !== d.machines_per_zone || settings.otherCores !== d.other_cores ||
-                    settings.limit !== d.limit;
+    const placeholders = d.placeholders && sizeUnchanged;
+    const changed = !sizeUnchanged || settings.limit !== d.limit;
     document.getElementById("placeholder-banner").hidden = !placeholders;
+    const source = document.getElementById("settings-source");
+    source.textContent = d.from ? "The management cluster's size is from " + d.from + "." : "";
+    source.hidden = !(d.from && sizeUnchanged);
     document.getElementById("settings-summary").textContent =
       (placeholders ? "Settings (placeholders): " : changed ? "Settings (changed): " : "Settings: ") +
       settings.machinesPerZone + " control-plane machines per zone, " + WHOLE.format(settings.otherCores) +
@@ -325,7 +328,7 @@
       "machines at their largest, as production plans quota for them. " + (d.placeholders
         ? "The defaults for its machines are placeholders, not production's: what the 49-node scale test's " +
           "management cluster had, which held 12 hosted clusters, so wasn't full."
-        : "The defaults are the settings this page was built with.");
+        : d.from ? "The defaults are from " + d.from + "." : "The defaults are the settings this page was built with.");
     document.getElementById("machines-help").textContent = "1 to " + MOST_PER_ZONE + ", each with " +
       DATA.machine_cores + " cores. The default is " + d.machines_per_zone +
       (d.placeholders ? ", a placeholder." : ".");

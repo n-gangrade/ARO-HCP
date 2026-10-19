@@ -464,9 +464,11 @@ copy with production's settings, outside the repo, as they're private:
 
     $PY cores_per_cluster.py --full N --other system=MACHINESxCORES infra=MACHINESxCORES --limit N \
         --output /tmp/cores-per-cluster-prod.json
-    $PY build_pm_page.py --cores /tmp/cores-per-cluster-prod.json --output ~/pm-page-prod.html
+    $PY build_pm_page.py --cores /tmp/cores-per-cluster-prod.json --output ~/pm-page-prod.html \
+        --settings-from "production's deployment configuration"
 
-Share that copy privately, and don't commit it or its JSON.
+`--settings-from` says at the top of the page where the management cluster's size comes from. Share that copy
+privately, and don't commit it or its JSON.
 
 ## Known limitations
 

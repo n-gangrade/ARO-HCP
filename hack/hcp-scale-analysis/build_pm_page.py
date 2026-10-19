@@ -15,7 +15,7 @@ for real quota requests, build a copy from a cores-per-cluster.json made with pr
 --limit, and keep that copy out of this public repo.
 
 Usage:
-  python3 build_pm_page.py [--cores FILE] [--output FILE]
+  python3 build_pm_page.py [--cores FILE] [--output FILE] [--settings-from TEXT]
 """
 import argparse
 import json
@@ -39,6 +39,10 @@ def parse_args():
                              "this script)")
     parser.add_argument("--output", default=DEFAULT_OUTPUT,
                         help="page to write (default: pm-page.html next to this script)")
+    parser.add_argument("--settings-from", metavar="TEXT",
+                        help="where the management cluster's settings come from, shown at the top of the page, such "
+                             "as \"production's deployment configuration\"; not for cores_per_cluster.py's "
+                             "placeholders, which the page warns about instead")
     return parser.parse_args()
 
 
@@ -57,7 +61,7 @@ def others_text(other_machines):
     return " and ".join(parts)
 
 
-def notes(cores, reserved_from):
+def notes(cores, reserved_from, settings_from):
     """The page's "How these numbers are worked out" list."""
     settings = cores["settings"]
     room = settings["room_per_machine"]
@@ -68,6 +72,8 @@ def notes(cores, reserved_from):
         defaults = ("The settings' defaults are placeholders, not production's: the size of the 49-node scale test's "
                     "management cluster, which held 12 hosted clusters, so wasn't full. For real quota requests, use a "
                     "copy of this page built with production's settings.")
+    elif settings_from:
+        defaults = f"The settings' defaults are from {settings_from}."
     else:
         defaults = "The settings' defaults are the ones this page was built with."
     return [
@@ -101,7 +107,7 @@ def notes(cores, reserved_from):
     ]
 
 
-def page_data(cores, size_pods):
+def page_data(cores, size_pods, settings_from):
     settings = cores["settings"]
     reserved = {size["size"]: size["reserved"]["totals"] for size in size_pods["sizes"]}
     return {
@@ -122,8 +128,9 @@ def page_data(cores, size_pods):
             "other_text": others_text(settings["other_machines"]),
             "limit": settings["limit"],
             "placeholders": settings.get("placeholders", True),
+            "from": settings_from,
         },
-        "notes": notes(cores, size_pods.get("reserved_from")),
+        "notes": notes(cores, size_pods.get("reserved_from"), settings_from),
     }
 
 
@@ -151,6 +158,9 @@ def main():
     cores = read_json(cores_path)
     size_pods = read_json(SIZE_PODS)
     check_inputs(cores, cores_path, size_pods)
+    if args.settings_from and cores["settings"].get("placeholders", True):
+        sys.exit(f"{cores_path} has cores_per_cluster.py's placeholder settings, so the page can't say they're from "
+                 f"{args.settings_from}: rebuild it with --full and --other")
     if cores.get("basis") != "reserved":
         print(f"warning: {cores_path} packs what the pods {cores.get('basis')}, not what they reserve",
               file=sys.stderr)
@@ -159,7 +169,7 @@ def main():
     if template.count(PLACEHOLDER) != 1:
         sys.exit(f"{TEMPLATE} must contain {PLACEHOLDER} exactly once")
     # Escaping "<" keeps the data from ever closing its <script> element early.
-    data = json.dumps(page_data(cores, size_pods), ensure_ascii=False).replace("<", "\\u003c")
+    data = json.dumps(page_data(cores, size_pods, args.settings_from), ensure_ascii=False).replace("<", "\\u003c")
     target = os.path.expanduser(args.output)
     with open(target, "w") as f:
         f.write(template.replace(PLACEHOLDER, data))
