@@ -14,21 +14,25 @@ share of a full management cluster's machines. For each size, this works out:
   most possible; otherwise the solver proves it is, or it's listed under not_proven with the most the room allows.
   Every packing is spread out into single clusters and checked with check_packing.py's rule checks, independently
   of the solver; it stops if one breaks a rule.
-- the cores one cluster takes on a full management cluster, with --full control-plane machines per zone: its share
-  of the control-plane machines (own_cores) and of the machines a management cluster runs besides them, its system
-  and infra machines (shared_cores), and the two added up (cores).
+- the cores one cluster takes on a full management cluster, with --full control-plane machines per zone and at most
+  --limit hosted clusters: its own share of the control-plane machines, by whatever runs out first (own_cores), and
+  its share of what's there for all the clusters, amortized: the machines a management cluster runs besides its
+  control-plane machines, its system and infra machines, which run its logging, monitoring and agents, and any
+  control-plane room the limit leaves unused (shared_cores), and the two added up (cores).
 
 The settings, the management cluster's machines, are placeholders to confirm (see FULL_PER_ZONE and the settings
-after it); --full, --fewest and --other change them. It writes cores-per-cluster.json next to this script, or
-cores-per-cluster-used.json with --basis used, which packs what the pods use instead of what they reserve.
+after it); --full, --other and --limit change them. Quota is planned per management cluster, for all its machines at
+their largest, so a region that needs another management cluster needs all of its cores at once
+(new_management_cluster_cores). It writes cores-per-cluster.json next to this script, or cores-per-cluster-used.json
+with --basis used, which packs what the pods use instead of what they reserve.
 
 Not included: spare room for upgrades, a zone failure or new clusters; the cluster autoscaler of clusters that use
 autoscaling; the shared pods some control-plane machines run, such as the HyperShift operator's, which in the
-49-node run used 3.5 GiB and 2.6 cores in all; and the infra machines' limits: each hosted cluster runs 5 ACM agent
-pods there.
+49-node run used 3.5 GiB and about 2.5 cores in all; and the infra machines' limits: each hosted cluster runs 5 ACM
+agent pods there.
 
 Usage:
-  python3 cores_per_cluster.py [--basis reserved|used] [--full N] [--fewest N] [--other POOL=MACHINESxCORES ...]
+  python3 cores_per_cluster.py [--basis reserved|used] [--full N] [--other POOL=MACHINESxCORES ...] [--limit N]
                                [--most N] [--seconds S] [--pods FILE] [--output FILE]
 
 Requires OR-Tools, which the scheduling simulator's environment has.
@@ -47,12 +51,14 @@ DEFAULT_OUTPUT = {"reserved": os.path.join(HERE, "cores-per-cluster.json"),
 # Control-plane machines per zone on a full management cluster. A placeholder: production's real number is in its
 # private deployment config. 6 is what the 49-node run's management cluster had, with 12 hosted clusters.
 FULL_PER_ZONE = 6
-# Control-plane machines per zone that a management cluster runs however few clusters it has, for a region that
-# needs a new one: 6 in the 49-node run (to confirm).
-FEWEST_PER_ZONE = 6
 # The machines a management cluster runs besides its control-plane machines, as (pool, machines, cores each): in the
-# 49-node run, 1 system machine with 8 cores and 3 infra machines with 32 (to confirm).
+# 49-node run, 1 system machine with 8 cores and 3 infra machines with 32 (to confirm; quota is planned for every
+# pool at its largest).
 OTHER_MACHINES = [("system", 1, 8), ("infra", 3, 32)]
+# The most hosted clusters on one management cluster: Clusters Service's limit (clustersService.
+# provisionShardClusterLimit in config/config.yaml). The Service Lifecycle team's capacity alert treats 60 as a
+# management cluster's limit (observability/alerts/mgmt-capacity-prometheusRule.yaml).
+LIMIT = 100
 MOST_PER_ZONE = 20  # clusters_that_fit goes up to this many control-plane machines per zone
 SECONDS = 60        # the solver's limit for each number of machines
 DECIMALS = 3
@@ -60,20 +66,24 @@ ROOM = {resource: cp.whole(pc.ROOM[resource], resource) for resource in pc.RESOU
 FIELDS = {
     "basis": "reserved: packs what the pods reserve today; used: what they use",
     "full_machines_per_zone": "control-plane machines in each zone of a full management cluster",
-    "fewest_machines_per_zone": "control-plane machines per zone that a management cluster runs however few clusters "
-                                "it has",
     "other_machines": "the machines a management cluster runs besides its control-plane machines",
-    "new_management_cluster_cores": "the cores of a new management cluster, with the fewest control-plane machines "
-                                    "and its other machines: what a region with no room left needs first",
+    "limit": "the most hosted clusters on one management cluster",
+    "new_management_cluster_cores": "the cores of a full management cluster, control-plane and other machines: quota "
+                                    "is planned per management cluster, for all its machines at their largest, so a "
+                                    "region that needs another one needs all of these at once",
     "clusters_that_fit": "the most clusters of the size that fit on a management cluster with 1, 2, ... control-plane "
                          "machines per zone, by the rules pack_clusters.py follows",
     "not_proven": "for numbers of machines per zone where clusters_that_fit isn't proven to be the most possible: the "
                   "most the machines' room allows in total",
-    "clusters": "how many clusters of the size fit on a full management cluster",
-    "fullest": "the resource the clusters use the largest share of, on a full management cluster",
-    "own_cores": "one cluster's share of a full management cluster's control-plane machines' cores",
-    "shared_cores": "one cluster's share of the cores of the machines a management cluster runs besides them",
-    "cores": "own_cores and shared_cores added up: the cores one cluster takes on a full management cluster",
+    "clusters": "how many clusters of the size a full management cluster holds: those that fit, at most the limit",
+    "runs_out_of": "the resource clusters of the size run out of first on a full management cluster",
+    "limited_by": "what stops more clusters of the size going on a full management cluster: runs_out_of, or the "
+                  "limit",
+    "own_cores": "one cluster's own share of a full management cluster's control-plane machines: their cores over "
+                 "the clusters that fit",
+    "shared_cores": "one cluster's share of what's there for all the clusters: the machines a management cluster runs "
+                    "besides its control-plane machines, and any control-plane room the limit leaves unused",
+    "cores": "own_cores and shared_cores added up: a full management cluster's cores over the clusters it holds",
 }
 
 
@@ -84,13 +94,12 @@ def parse_args():
                         help="pack what the pods reserve today, or what they use (default: reserved)")
     parser.add_argument("--full", type=int, default=FULL_PER_ZONE, metavar="N",
                         help=f"control-plane machines per zone on a full management cluster (default: {FULL_PER_ZONE})")
-    parser.add_argument("--fewest", type=int, default=FEWEST_PER_ZONE, metavar="N",
-                        help="control-plane machines per zone that a management cluster runs however few clusters it "
-                             f"has (default: {FEWEST_PER_ZONE})")
     parser.add_argument("--other", nargs="+", type=other_pool, metavar="POOL=MACHINESxCORES",
                         default=OTHER_MACHINES,
                         help="the machines a management cluster runs besides its control-plane machines (default: "
                              + " ".join(f"{pool}={machines}x{cores}" for pool, machines, cores in OTHER_MACHINES) + ")")
+    parser.add_argument("--limit", type=int, default=LIMIT, metavar="N",
+                        help=f"the most hosted clusters on one management cluster (default: {LIMIT})")
     parser.add_argument("--most", type=int, default=MOST_PER_ZONE, metavar="N",
                         help=f"work out clusters_that_fit up to this many machines per zone (default: {MOST_PER_ZONE})")
     parser.add_argument("--seconds", type=float, default=SECONDS, metavar="S",
@@ -103,8 +112,8 @@ def parse_args():
     args = parser.parse_args()
     if not 1 <= args.full <= args.most:
         parser.error(f"--full must be between 1 and --most ({args.most})")
-    if args.fewest < 1:
-        parser.error("--fewest must be 1 or more")
+    if args.limit < 1:
+        parser.error("--limit must be 1 or more")
     return args
 
 
@@ -128,11 +137,15 @@ def load_sizes(path, basis):
 
 
 def components(size, pods):
-    """[(component, copies, {resource: what one copy needs, in whole thousandths})]."""
+    """[(component, copies, {resource: what one copy needs, in whole thousandths})]. The solver spreads the copies of
+    a component with more than one copy over the zones, so it stops at one that doesn't run one copy per zone."""
     out = []
     for pod in pods:
         if pod["copies"] not in range(1, pc.ZONES + 1):
             sys.exit(f"{size}'s {pod['component']} has {pod['copies']} copies; this handles 1 to {pc.ZONES}")
+        if pod["copies"] > 1 and not pod["one_per_zone"]:
+            sys.exit(f"{size}'s {pod['component']} has {pod['copies']} copies that don't run one per zone, which this "
+                     "doesn't handle")
         out.append((pod["component"], pod["copies"], {r: cp.whole(v, r) for r, v in cp.needs(pod).items()}))
     return out
 
@@ -286,15 +299,18 @@ def main():
                 broken += 1
                 print(f"{size}, {per_zone} machines per zone: {'; '.join(problems[:3])}", file=sys.stderr)
         packing = found[args.full][0]
-        clusters = packing["clusters"]
+        fit = packing["clusters"]
+        clusters = min(fit, args.limit)
+        runs_out_of = fullest(comps, packing, args.full)
         sizes.append({
             "size": size,
             "nodes_from": nodes_from,
             "nodes_to": nodes_to,
             "clusters": clusters,
-            "fullest": fullest(comps, packing, args.full),
-            "own_cores": round(full_cores / clusters, DECIMALS),
-            "shared_cores": round(other_cores / clusters, DECIMALS),
+            "runs_out_of": runs_out_of,
+            "limited_by": "limit" if clusters < fit else runs_out_of,
+            "own_cores": round(full_cores / fit, DECIMALS),
+            "shared_cores": round((full_cores + other_cores) / clusters - full_cores / fit, DECIMALS),
             "cores": round((full_cores + other_cores) / clusters, DECIMALS),
             "clusters_that_fit": [found[per_zone][0]["clusters"] for per_zone in range(1, args.most + 1)],
             "not_proven": {str(per_zone): allows for per_zone, (_, allows, proven) in found.items() if not proven},
@@ -310,12 +326,12 @@ def main():
             "machine_cores": pc.MACHINE_CORES,
             "zones": pc.ZONES,
             "full_machines_per_zone": args.full,
-            "fewest_machines_per_zone": args.fewest,
             "other_machines": [{"pool": pool, "machines": machines, "cores": cores}
                                for pool, machines, cores in args.other],
+            "limit": args.limit,
             "room_per_machine": pc.ROOM,
         },
-        "new_management_cluster_cores": pc.ZONES * args.fewest * pc.MACHINE_CORES + other_cores,
+        "new_management_cluster_cores": full_cores + other_cores,
         "fields": FIELDS,
         "sizes": sizes,
     }
@@ -327,17 +343,18 @@ def main():
     others = " and ".join(f"{machines} {pool} machine{'s' if machines != 1 else ''} with {cores} cores"
                           for pool, machines, cores in args.other)
     print(f"A full management cluster ({args.basis} pods): {args.full} control-plane machines per zone "
-          f"({full_cores} cores), plus {others} ({other_cores} cores):")
-    print(f"{'size':>8} {'clusters':>9} {'own cores':>10} {'shared':>7} {'cores each':>11}  runs out first")
+          f"({full_cores} cores), plus {others} ({other_cores} cores), at most {args.limit} hosted clusters:")
+    print(f"{'size':>8} {'clusters':>9} {'own cores':>10} {'shared':>7} {'cores each':>11}  limited by")
     for size in sizes:
+        limited_by = pc.RESOURCE_NAMES.get(size["limited_by"], f"the limit of {args.limit}")
         print(f"{size['size']:>8} {size['clusters']:9d} {size['own_cores']:10.2f} {size['shared_cores']:7.2f} "
-              f"{size['cores']:11.2f}  {pc.RESOURCE_NAMES[size['fullest']]}")
+              f"{size['cores']:11.2f}  {limited_by}")
     print(f"Clusters that fit, for 1 to {args.most} control-plane machines per zone (* not proven the most possible):")
     for size in sizes:
         print(f"{size['size']:>8} " + " ".join(f"{count}{'*' if str(per_zone) in size['not_proven'] else ''}"
                                                for per_zone, count in enumerate(size['clusters_that_fit'], 1)))
-    print(f"A region with no room left needs a new management cluster first: {output['new_management_cluster_cores']} "
-          f"cores ({args.fewest} control-plane machines per zone and the other machines).")
+    print(f"Quota is planned per management cluster: a region that needs another one needs all its "
+          f"{output['new_management_cluster_cores']} cores at once.")
     print(f"Checked: all {len(sizes) * args.most} packings follow the rules.")
 
 

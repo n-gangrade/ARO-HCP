@@ -5,7 +5,6 @@
     "machine_cores": 32,
     "zones": 3,
     "full_machines_per_zone": 6,
-    "fewest_machines_per_zone": 6,
     "other_machines": [
       {
         "pool": "system",
@@ -18,6 +17,7 @@
         "cores": 32
       }
     ],
+    "limit": 100,
     "room_per_machine": {
       "cpu_cores": 28.532,
       "memory_gib": 240.819,
@@ -29,16 +29,17 @@
   "fields": {
     "basis": "reserved: packs what the pods reserve today; used: what they use",
     "full_machines_per_zone": "control-plane machines in each zone of a full management cluster",
-    "fewest_machines_per_zone": "control-plane machines per zone that a management cluster runs however few clusters it has",
     "other_machines": "the machines a management cluster runs besides its control-plane machines",
-    "new_management_cluster_cores": "the cores of a new management cluster, with the fewest control-plane machines and its other machines: what a region with no room left needs first",
+    "limit": "the most hosted clusters on one management cluster",
+    "new_management_cluster_cores": "the cores of a full management cluster, control-plane and other machines: quota is planned per management cluster, for all its machines at their largest, so a region that needs another one needs all of these at once",
     "clusters_that_fit": "the most clusters of the size that fit on a management cluster with 1, 2, ... control-plane machines per zone, by the rules pack_clusters.py follows",
     "not_proven": "for numbers of machines per zone where clusters_that_fit isn't proven to be the most possible: the most the machines' room allows in total",
-    "clusters": "how many clusters of the size fit on a full management cluster",
-    "fullest": "the resource the clusters use the largest share of, on a full management cluster",
-    "own_cores": "one cluster's share of a full management cluster's control-plane machines' cores",
-    "shared_cores": "one cluster's share of the cores of the machines a management cluster runs besides them",
-    "cores": "own_cores and shared_cores added up: the cores one cluster takes on a full management cluster"
+    "clusters": "how many clusters of the size a full management cluster holds: those that fit, at most the limit",
+    "runs_out_of": "the resource clusters of the size run out of first on a full management cluster",
+    "limited_by": "what stops more clusters of the size going on a full management cluster: runs_out_of, or the limit",
+    "own_cores": "one cluster's own share of a full management cluster's control-plane machines: their cores over the clusters that fit",
+    "shared_cores": "one cluster's share of what's there for all the clusters: the machines a management cluster runs besides its control-plane machines, and any control-plane room the limit leaves unused",
+    "cores": "own_cores and shared_cores added up: a full management cluster's cores over the clusters it holds"
   },
   "sizes": [
     {
@@ -46,7 +47,8 @@
       "nodes_from": 0,
       "nodes_to": 60,
       "clusters": 42,
-      "fullest": "swift_nics",
+      "runs_out_of": "swift_nics",
+      "limited_by": "swift_nics",
       "own_cores": 13.714,
       "shared_cores": 2.476,
       "cores": 16.19,
@@ -79,7 +81,8 @@
       "nodes_from": 61,
       "nodes_to": 120,
       "clusters": 42,
-      "fullest": "swift_nics",
+      "runs_out_of": "swift_nics",
+      "limited_by": "swift_nics",
       "own_cores": 13.714,
       "shared_cores": 2.476,
       "cores": 16.19,
@@ -112,7 +115,8 @@
       "nodes_from": 121,
       "nodes_to": 252,
       "clusters": 32,
-      "fullest": "memory_gib",
+      "runs_out_of": "memory_gib",
+      "limited_by": "memory_gib",
       "own_cores": 18.0,
       "shared_cores": 3.25,
       "cores": 21.25,
@@ -145,7 +149,8 @@
       "nodes_from": 253,
       "nodes_to": 360,
       "clusters": 15,
-      "fullest": "memory_gib",
+      "runs_out_of": "memory_gib",
+      "limited_by": "memory_gib",
       "own_cores": 38.4,
       "shared_cores": 6.933,
       "cores": 45.333,
@@ -178,7 +183,8 @@
       "nodes_from": 361,
       "nodes_to": null,
       "clusters": 11,
-      "fullest": "memory_gib",
+      "runs_out_of": "memory_gib",
+      "limited_by": "memory_gib",
       "own_cores": 52.364,
       "shared_cores": 9.455,
       "cores": 61.818,

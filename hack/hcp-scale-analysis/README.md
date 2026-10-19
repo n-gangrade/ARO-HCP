@@ -17,15 +17,17 @@ hosted-cluster size, plus a note on how much to trust each size.
 | `pack_clusters.py` | Works out how many control-plane machines, and so cores of quota, a mix of hosted clusters needs, by packing their pods from `size-pods.json` |
 | `check_packing.py` | Checks that `pack_clusters.py`'s packings follow the rules, and compares them with the fewest machines possible |
 | `cores_per_cluster.py` | Works out the cores one cluster of each size takes on a full management cluster, into `cores-per-cluster.json`: the numbers for the PM page |
-| `build_pm_page.py` | Builds the PM page, `pm-page.html`, from `pm-page-template.html` and `size-cores.json` |
+| `fetch_prices.py` | Fetches Azure's list price of a control-plane machine in every region, into `machine-prices.json`, for the PM page's costs |
+| `build_pm_page.py` | Builds the PM page, `pm-page.html`, from `pm-page-template.html`, `cores-per-cluster.json` and `machine-prices.json` |
 | `pm-page-template.html` | The PM page's layout and code, without the numbers |
 | `run-notes.json` | Hand-written trust note for each run (`good`, `caveats` or `low`, and why) |
 | `container-usage.json` | Generated: per-container usage of every run and what Kubernetes reserved, with the run's trust note. The input for comparing sizes and for `component_requests.py` and `simulator_profiles.py` |
 | `simulator-profiles.json` | Generated: what one copy of each component needs for each size, for the scheduling simulator |
 | `size-pods.json` | Generated: the pods one cluster of each t-shirt size runs, with what each copy reserves today and what it uses, for simulating how clusters pack onto machines |
-| `size-cores.json` | Generated: one cluster's own, shared and total cores for each size. The input for the PM page |
-| `cores-per-cluster.json` | Generated: how many clusters of each size fit on a management cluster, and the cores one cluster takes on a full one |
-| `pm-page.html` | Generated: the PM page, a single self-contained file that estimates the cores to request per region and customer |
+| `size-cores.json` | Generated: one cluster's own, shared and total cores for each size, by the scheduling simulator |
+| `cores-per-cluster.json` | Generated: how many clusters of each size fit on a management cluster, and the cores one cluster takes on a full one. The input for the PM page |
+| `machine-prices.json` | Generated: Azure's list price of a control-plane machine in every region. The input for the PM page's costs |
+| `pm-page.html` | Generated: the PM page, a single self-contained file that works out the cores to request, and their cost, per region and customer |
 | `graphs/` | Generated: CPU and memory graphs and a `summary.json` for every run |
 
 The older scripts here (`extract_all.py`, `extract_kas.py`, `plot_kas.py`, `plot_kas_sum.py`, `report_replicas.py`,
@@ -63,21 +65,23 @@ your Python (for example `PY=../scheduling-simulator/venv/bin/python`):
 
        $PY cores_per_cluster.py
 
-6. Rebuild the simulator's input from the data file. If a new run tests a size that another run already tests, say
+6. Rebuild the PM page from it and the machine prices. To update the prices first, run `fetch_prices.py`, which
+   needs a network connection:
+
+       $PY fetch_prices.py
+       $PY build_pm_page.py
+
+7. Rebuild the simulator's input from the data file. If a new run tests a size that another run already tests, say
    which one to use in `PREFERRED_RUNS` in `simulator_profiles.py`:
 
        $PY simulator_profiles.py
 
-7. Rebuild the cores per size from it (a few seconds; about 30 with `--machines simulator`):
+8. Rebuild the simulator's cores per size from it (a few seconds; about 30 with `--machines simulator`):
 
        $PY size_cores.py
 
-8. Rebuild the PM page from it:
-
-       $PY build_pm_page.py
-
 9. Commit `graphs/`, `run-notes.json`, `container-usage.json`, `size-pods.json`, `cores-per-cluster.json`,
-   `simulator-profiles.json`, `size-cores.json` and `pm-page.html`.
+   `machine-prices.json`, `pm-page.html`, `simulator-profiles.json` and `size-cores.json`.
 
 To look at one run in detail:
 
@@ -266,7 +270,7 @@ fits on a machine already there, the least full first, and there on the machine 
 copy needs, which keeps a zone's machines from filling up lopsidedly, one out of memory and another out of pod slots.
 It adds a machine only when a copy fits on none. It reports the machines in each zone, the cores to request for them
 (whole machines), and how full each kind of room is. That isn't how production's scheduler places pods: HyperShift
-prefers to keep a cluster's pods together, and in the 49-node run, 37 to 44 of each complete cluster's 60 to 67 pods
+prefers to keep a cluster's pods together, and in the 49-node run, about 40 of each complete cluster's 60 to 67 pods
 were on one machine.
 
 One machine in each zone (3 machines, 96 cores) holds 7 small or 7 medium clusters, as their SWIFT NICs run out
@@ -278,12 +282,12 @@ reserve 45.5 cores; and a single cluster of any size needs 3 machines, one in ea
 and works out the fewest machines possible with an exact solver, doing the same arithmetic, to compare. In 155
 cases, no packing broke a rule or disagreed with the solver. It needed the fewest machines for every mix of small and
 medium clusters (40 of 40), and for 66 of 75 counts of one size alone (1 to 15 clusters); the other 9, with 8 or more
-large, xlarge or xxlarge clusters, needed 1 or 2 more. Of 40 mixes with larger sizes, it needed the fewest in 18 and
-1 to 4 more in 18; the solver ran out of time on the other 4. The gap grows with the number of larger clusters: 20
+large, xlarge or xxlarge clusters, needed 1 or 2 more. Of 40 mixes with larger sizes, in one run it needed the
+fewest in 18 and 1 to 4 more in 18, and the solver ran out of time on the other 4; these counts vary between runs, as
+the solver has a time limit. The gap grows with the number of larger clusters: 20
 large clusters need 14 machines here and 12 at the fewest, 30 need 21 and 17. Adding a cluster can even lower the
 answer: 14 large clusters need 11 machines here, 15 only 9. No packing that follows the rules needs fewer than the
-fewest, so it never comes in under that. Rerun `check_packing.py` after changing the packing (about 11 minutes); how
-many cases the solver finishes in time can vary from run to run.
+fewest, so it never comes in under that. Rerun `check_packing.py` after changing the packing (about 11 minutes).
 
 **It packs the clusters given on their own, which production doesn't.** Production's placement controller
 (`selectByCapacity` in `backend/pkg/controllers/cluster/placement/placement_controller.go`) puts each new hosted
@@ -313,7 +317,7 @@ the most free SWIFT NICs. So each cluster takes its share of a full management c
 cores are their clusters' shares added up.
 
     $PY cores_per_cluster.py
-    $PY cores_per_cluster.py --full 10 --other system=1x8 infra=3x32
+    $PY cores_per_cluster.py --full 10 --other system=1x8 infra=3x32 --limit 60 --output /tmp/cores-per-cluster.json
 
 For each size it works out:
 
@@ -328,22 +332,28 @@ For each size it works out:
   large and bigger, the machines' memory divided by one cluster's. It takes about 10 seconds, with the same result
   every time. A number the solver can't prove is the most possible is listed under `not_proven`, and could come out
   differently in another run.
-- **Cores per cluster:** on a full management cluster, a cluster's share of its control-plane machines (`own_cores`:
-  their cores over the clusters that fit) and of the machines it runs besides them, its system and infra machines
-  (`shared_cores`), and the two added up (`cores`).
+- **Cores per cluster** on a full management cluster, holding the clusters that fit, but no more than the limit:
+  - `own_cores`: the cluster's own share of the control-plane machines, which its control plane runs on: their cores
+    over the clusters that fit;
+  - `shared_cores`: its share of what's there for all the clusters, amortized: the machines a management cluster
+    runs besides its control-plane machines, its system and infra machines, which run its logging, monitoring and
+    cluster-management agents, and any control-plane room the limit leaves unused;
+  - `cores`: the two added up, a full management cluster's cores over the clusters it holds.
 
-The management cluster's machines are settings, all placeholders to confirm, as production's real numbers are in its
-private deployment config:
+The management cluster's settings are all placeholders to confirm, as production's real numbers are in its private
+deployment config:
 
 - **Control-plane machines per zone on a full management cluster** (`--full`): 6, what the 49-node run's management
   cluster had with its 12 hosted clusters; a full one can have more.
 - **Its other machines** (`--other`): 1 system machine with 8 cores and 3 infra machines with 32, what the 49-node
-  run's management cluster had.
-- **The fewest control-plane machines per zone a management cluster runs** (`--fewest`): 6 in the 49-node run.
+  run's management cluster had. Quota is planned with every pool at its largest, so count them at their largest.
+- **The most hosted clusters per management cluster** (`--limit`): 100, Clusters Service's limit
+  (`clustersService.provisionShardClusterLimit` in `config/config.yaml`). The Service Lifecycle team's capacity alert
+  (`observability/alerts/mgmt-capacity-prometheusRule.yaml`) treats 60 as a management cluster's limit.
 
 With these settings:
 
-| Size | Clusters on a full management cluster | Own cores | Shared cores | Cores per cluster | Runs out first |
+| Size | Clusters on a full management cluster | Own cores | Shared cores | Cores per cluster | Limited by |
 |---|---|---|---|---|---|
 | small | 42 | 13.71 | 2.48 | 16.19 | SWIFT NICs |
 | medium | 42 | 13.71 | 2.48 | 16.19 | SWIFT NICs |
@@ -353,18 +363,26 @@ With these settings:
 
 So 10 small clusters take about 162 cores, where on machines of their own they need 192 (`pack_clusters.py`). With
 more machines per zone, a cluster's own cores barely change, while the other machines' cores are shared by more
-clusters: with 20 per zone, a small cluster takes 14.46 cores. A region whose management clusters have no room left
-needs a new one first: 680 cores with these settings (`new_management_cluster_cores`).
+clusters, until the limit stops more clusters going on: then the control-plane room left unused is shared too. With
+a limit of 60, small, medium and large clusters all take a full management cluster's cores over 60.
+
+Quota is planned per management cluster, for all its machines at their largest, so these per-cluster numbers are
+averages: a region whose management clusters are full needs a whole new one at once, 680 cores with these settings
+(`new_management_cluster_cores`).
 
 Not included:
 
 - **How tightly production packs:** the solver packs the machines as tightly as the rules allow, while production's
   scheduler places pods one at a time, preferring to keep a cluster's pods together, and its placement controller
-  only counts SWIFT NICs. For small and medium clusters, whose SWIFT NICs run out first, that makes no difference;
-  large and bigger ones may take more machines in production.
+  only counts SWIFT NICs. For small and medium clusters, whose SWIFT NICs run out first, the placement controller
+  stops where the solver does; large and bigger ones may take more machines in production, and the placement
+  controller could put more of them on a management cluster than its memory holds.
+- **Mixing sizes:** each size's share assumes a management cluster full of that size. Small and medium clusters run
+  out of SWIFT NICs and larger ones out of memory, so a management cluster holding both can hold more than their
+  shares add up to.
 - Spare room for upgrades, a zone failure or new clusters, and the cluster autoscaler of clusters that use
   autoscaling.
-- **The shared pods on the control-plane machines**, which in the 49-node run used 3.5 GiB and 2.6 cores in all.
+- **The shared pods on the control-plane machines**, which in the 49-node run used 3.5 GiB and about 2.5 cores in all.
 - **The infra machines' limits:** each hosted cluster runs 5 ACM agent pods on them. In the 49-node run, the 3 infra
   machines ran 129 pods, 52 of them agents for 11 clusters. With 225 pod slots each (`maxPods` in
   `dev-infrastructure/modules/aks-cluster-base.bicep`), they'd hold the agents of about 119 clusters, so a management
@@ -379,7 +397,8 @@ reserve.
 
 ## Cores per cluster size
 
-The PM page still uses these numbers, until it moves to `cores_per_cluster.py`'s (see the previous section).
+The PM page no longer uses these numbers: it uses `cores_per_cluster.py`'s (see "Cores per cluster on a full
+management cluster").
 
 `size_cores.py` packs a sample mix of hosted clusters onto management-cluster machines with the scheduling
 simulator, then splits the machines between the clusters the way the simulator splits its bill: each pool goes to
@@ -418,19 +437,31 @@ These depend on assumptions, recorded in the file's `settings`:
 ## PM page
 
 `pm-page.html` is a single file with the numbers built in: open it in a browser, or send it to someone. It needs no
-server, network connection or other files. Add a row for each customer, region, cluster size and number of
-clusters, and it shows:
+server, network connection or other files. Add a row for each customer, region, cluster size and number of clusters,
+and it shows, using `cores-per-cluster.json`'s numbers:
 
-- **Cores to request per region:** the clusters' own cores, their shared cores and the total, rounded up to whole
-  cores.
+- **Cores to request per region:** the clusters' own cores, their amortized cores and the total, rounded up to whole
+  cores; how many full management clusters' worth they take; and what they cost a month.
 - **Per customer and region:** the same, split by customer.
-- **Cores per cluster:** the table from `size-cores.json`, with each size's trust level, and a notice when a row
-  uses a size whose test data is less reliable.
-- **How the numbers are worked out:** the assumptions behind them, and the test run and trust note behind each size.
+- **Cores per cluster:** what one cluster of each size takes on a full management cluster, and what limits how many
+  fit.
+- **How the numbers are worked out:** the assumptions behind them.
 
-Sizes are the tested numbers of worker nodes; for a size in between, use the next larger one. Regions are free text
-for now, used only to group the rows; costs in dollars aren't included yet. To change the layout, edit
-`pm-page-template.html` and rebuild; `build_pm_page.py` fills in the numbers where it says `__PAGE_DATA__`.
+Its settings are the management cluster's (see "Cores per cluster on a full management cluster"): control-plane
+machines per zone, the cores of its other machines and the most hosted clusters on one. They start at
+`cores-per-cluster.json`'s placeholders, and can be changed on the page. As the page can't run the solver, its
+control-plane machines are always the 32-core machines the numbers were worked out for, with 1 to 20 per zone.
+
+Costs use Azure's list price of a `Standard_E32ds_v6` machine (the control-plane machine the public config names) in
+each row's region, from `machine-prices.json`, per core, for every core, 730 hours a month: Linux pay-as-you-go,
+without discounts such as reservations. Production uses other machine types in some regions. Regions are matched by
+their Azure name, such as `eastus2` or "East US 2"; for a region the price list doesn't have, the page uses eastus2's
+price and says so. A price per core-hour on the page replaces them all. `fetch_prices.py` updates the prices from
+Azure's public Retail Prices API.
+
+To change the layout, edit `pm-page-template.html` and rebuild; `build_pm_page.py` fills in the numbers where it says
+`__PAGE_DATA__`. To give it production's settings without committing them, rebuild `cores-per-cluster.json` and the
+page with your own `--full`, `--other` and `--limit`, and keep that page to yourself.
 
 ## Known limitations
 

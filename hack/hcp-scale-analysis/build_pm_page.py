@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
-"""Build the PM page: one self-contained HTML file that estimates management-cluster cores.
+"""Build the PM page: one self-contained HTML file that works out the cores customers' hosted clusters need.
 
-Reads size-cores.json (from size_cores.py), the simulator profiles it was built from (for the
-percentile used) and container-usage.json (for each test run's trust note), puts them into
-pm-page-template.html and writes pm-page.html, all next to this script by default. The page needs no
-server or network connection: open it in a browser, or send the file to someone. Rerun this after
-size_cores.py whenever the numbers change.
+Reads cores-per-cluster.json (from cores_per_cluster.py), machine-prices.json (from fetch_prices.py) and size-pods.json
+(for the test run its reservations come from), puts them into pm-page-template.html and writes pm-page.html, all next
+to this script by default. The page needs no server or network connection: open it in a browser, or send the file to
+someone. Rerun this whenever those files change.
+
+On the page, PMs add a row for each customer, region, cluster size and number of clusters, and get the cores to
+request per region and per customer: each cluster's own share of a full management cluster's control-plane machines
+and its amortized share of what's there for all the clusters, and what they cost a month at Azure's list prices. The
+management cluster's settings are on the page, with this file's numbers as defaults.
 
 Usage:
-  python3 build_pm_page.py [--cores FILE] [--output FILE]
+  python3 build_pm_page.py [--cores FILE] [--prices FILE] [--output FILE]
 """
 import argparse
 import json
@@ -16,30 +20,32 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_CORES = os.path.join(HERE, "size-cores.json")
+DEFAULT_CORES = os.path.join(HERE, "cores-per-cluster.json")
+DEFAULT_PRICES = os.path.join(HERE, "machine-prices.json")
 DEFAULT_OUTPUT = os.path.join(HERE, "pm-page.html")
 TEMPLATE = os.path.join(HERE, "pm-page-template.html")
-USAGE_DATA = os.path.join(HERE, "container-usage.json")
+SIZE_PODS = os.path.join(HERE, "size-pods.json")
 PLACEHOLDER = "__PAGE_DATA__"
-PLACEMENTS = {
-    "legacy": "today's placement, with 3 copies of each API server, one in each availability zone",
-    "minimal": "the proposed minimal-zonal placement, with 2 copies of each API server",
-}
+HOURS_PER_MONTH = 730  # Azure's own monthly figure
+FALLBACK_REGION = "eastus2"  # the price used for a region the price list doesn't have
+RESOURCE_NAMES = {"cpu_cores": "CPU", "memory_gib": "memory", "swift_nics": "network cards (SWIFT NICs)",
+                  "pods": "pod slots"}
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--cores", default=DEFAULT_CORES,
-                        help="cores per size from size_cores.py (default: size-cores.json next to this script)")
+                        help="cores per cluster from cores_per_cluster.py (default: cores-per-cluster.json next to "
+                             "this script)")
+    parser.add_argument("--prices", default=DEFAULT_PRICES,
+                        help="machine prices from fetch_prices.py (default: machine-prices.json next to this script)")
     parser.add_argument("--output", default=DEFAULT_OUTPUT,
                         help="page to write (default: pm-page.html next to this script)")
     return parser.parse_args()
 
 
-def read_json(path, required=True):
-    if not os.path.exists(path) and not required:
-        return None
+def read_json(path):
     try:
         with open(path) as f:
             return json.load(f)
@@ -47,66 +53,82 @@ def read_json(path, required=True):
         sys.exit(f"couldn't read {path}: {error}")
 
 
-def ordinal(percentile):
-    """ "p95" -> "95th percentile"."""
-    number = int(percentile.lstrip("p"))
-    suffix = "th" if 10 <= number % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(number % 10, "th")
-    return f"{number}{suffix} percentile"
+def others_text(other_machines):
+    """ "1 system machine with 8 cores and 3 infra machines with 32 cores"."""
+    parts = [f"{pool['machines']} {pool['pool']} machine{'s' if pool['machines'] != 1 else ''} with {pool['cores']} "
+             f"cores" for pool in other_machines]
+    return " and ".join(parts)
 
 
-def machines_text(cores):
-    types = cores["machine_types"]
-    if cores["settings"]["machines"] == "production":
-        return "production's management-cluster machines, " + ", ".join(
-            f"{name} ({spec['vcpu']} cores, {spec['memory_gib']:g} GiB)" for name, spec in types.items())
-    sizes = sorted({spec["vcpu"] for spec in types.values()})
-    return f"the scheduling simulator's own choice of machines ({sizes[0]} to {sizes[-1]} cores)"
-
-
-def assumptions(cores, profiles):
+def notes(cores, prices, reserved_from):
+    """The page's "How these numbers are worked out" list."""
     settings = cores["settings"]
-    simulator = settings["simulator"]
-    mix = settings["mix"]
-    mix_text = ", ".join(f"{count} of {size} nodes" for size, count in sorted(mix.items(), key=lambda item: int(item[0])))
-    usage = (f"Usage comes from one kube-burner scale test per cluster size: for each container, the "
-             f"{ordinal(profiles['settings']['percentile'])} of all its copies' readings during the test's steady "
-             f"churn phase. A pod reserves what its containers add up to.") if profiles else \
-        "Usage comes from one kube-burner scale test per cluster size."
-    margin = simulator["multiplier"]
+    room = settings["room_per_machine"]
+    run = reserved_from or {}
+    source = (f"the newest scale test that recorded them ({run['run']}: OpenShift {run['ocp_version']}, {run['date']})"
+              if run.get("run") else "the newest scale test that recorded them")
     return [
-        usage,
-        "Own cores: what one cluster's own control-plane pods reserve, including a router and two login components "
-        "that the scheduling simulator adds to every cluster, although production's clusters don't run them.",
-        "Shared cores: the cluster's share of what no single cluster owns: system reservations and agents on every "
-        "machine, spare room for upgrades and a zone failure, placeholder slots for new clusters, and room left unused "
-        f"when machines fill up on one resource first. It comes from the scheduling simulator packing a sample mix of "
-        f"{sum(mix.values())} clusters ({mix_text}) onto {machines_text(cores)}.",
-        f"Placement: {PLACEMENTS.get(simulator['policy'], simulator['policy'])}.",
-        "No safety margin is added." if margin == 1 else
-        f"Every component's reservation is increased by {round((margin - 1) * 100):g}%.",
-        "These are estimates for planning, not an exact bill. They cover the management-cluster machines only, and "
-        "don't include costs in dollars yet.",
+        f"What a cluster needs: the pods one hosted cluster of each size runs and what each one reserves (its "
+        f"resource requests), from {source}, with each size's memory settings from HyperShift's cluster sizing "
+        f"configuration. A size covers its number of nodes, infra nodes as well as workers.",
+        f"How many fit: the most clusters of each size that fit on a full management cluster, worked out by an exact "
+        f"solver and checked pod by pod, by production's rules. Each copy of a component with more than one copy runs "
+        f"in a different availability zone ({settings['zones']} zones), and each {settings['machine_cores']}-core "
+        f"control-plane machine has room for {room['cpu_cores']:g} cores, {room['memory_gib']:g} GiB of memory, "
+        f"{room['swift_nics']:g} network cards (SWIFT NICs: each router copy takes one) and {room['pods']:g} pods, "
+        f"after what it keeps for its system and the helper pods every machine runs. Small and medium clusters run "
+        f"out of network cards first; large and bigger ones run out of memory.",
+        "Own cores: one cluster's share of a full management cluster's control-plane machines, the machines its own "
+        "control plane runs on: their cores divided by the clusters that fit.",
+        "Amortized cores: one cluster's share of what's there for all the clusters: the management cluster's other "
+        "machines (its system and infra machines, which run its logging, monitoring and cluster-management agents), "
+        "and any control-plane room left unused because of the limit on clusters per management cluster.",
+        "Quota is planned per management cluster, for all its machines at their largest, so a cluster's cores are an "
+        "average share: a region whose management clusters are full needs a whole new one at once.",
+        f"Costs: Azure's list price of a {prices['machine']} machine in the row's region, per core, for every core, "
+        f"{HOURS_PER_MONTH} hours a month ({prices['purchase_model']}, retrieved {prices['retrieved']}). Production "
+        f"uses other machine types in some regions, and discounts such as reservations aren't included. For a region "
+        f"the price list doesn't have, the page uses {FALLBACK_REGION}'s price.",
+        "The settings above are placeholders, to replace with production's own numbers from its deployment "
+        "configuration.",
+        "Not included: spare room for upgrades, a zone failure or new clusters; the cluster autoscaler of clusters "
+        "that use autoscaling; the shared pods some control-plane machines run, such as the HyperShift operator's. "
+        "The numbers assume machines are packed as tightly as the rules allow, which production's scheduler and "
+        "placement may not manage for large and bigger clusters. Mixing sizes on a management cluster packs a little "
+        "better than their shares add up to.",
+        "These are estimates for planning, not an exact bill.",
     ]
 
 
-def page_data(cores, profiles, usage):
-    runs = {run["run"]: run for run in (usage or {}).get("runs", [])}
-    sizes = []
-    for size, numbers in sorted(cores["sizes"].items(), key=lambda item: int(item[0])):
-        run = runs.get(numbers["run"], {})
-        sizes.append({
-            "size": size,
-            "run": numbers["run"],
-            "trust": numbers["trust"] or "caveats",
-            "date": run.get("date"),
-            "notes": run.get("notes"),
-            "own_cores": numbers["own_cores"],
-            "total_cores": numbers["total_cores"],
-        })
+def page_data(cores, prices, reserved_from):
+    settings = cores["settings"]
+    per_core_hour = {region: price / prices["cores"] for region, price in prices["hourly"].items()}
+    if FALLBACK_REGION not in per_core_hour:
+        sys.exit(f"the price list has no price for {FALLBACK_REGION}, the page's fallback region")
     return {
-        "sizes": sizes,
-        "assumptions": assumptions(cores, profiles),
-        "notes_for_all_runs": (usage or {}).get("notes_for_all_runs"),
+        "sizes": [{
+            "size": size["size"],
+            "nodes_from": size["nodes_from"],
+            "nodes_to": size["nodes_to"],
+            "clusters_that_fit": size["clusters_that_fit"],
+            "runs_out_of": RESOURCE_NAMES.get(size["runs_out_of"], size["runs_out_of"]),
+        } for size in cores["sizes"]],
+        "machine_cores": settings["machine_cores"],
+        "zones": settings["zones"],
+        "defaults": {
+            "machines_per_zone": settings["full_machines_per_zone"],
+            "other_cores": sum(pool["machines"] * pool["cores"] for pool in settings["other_machines"]),
+            "other_text": others_text(settings["other_machines"]),
+            "limit": settings["limit"],
+        },
+        "prices": {
+            "machine": prices["machine"],
+            "retrieved": prices["retrieved"],
+            "per_core_hour": per_core_hour,
+            "fallback_region": FALLBACK_REGION,
+        },
+        "hours_per_month": HOURS_PER_MONTH,
+        "notes": notes(cores, prices, reserved_from),
     }
 
 
@@ -116,18 +138,21 @@ def main():
     cores = read_json(cores_path)
     if not cores.get("sizes"):
         sys.exit(f"{cores_path} has no sizes")
-    profiles = read_json(os.path.join(os.path.dirname(cores_path), cores["settings"]["profiles"]), required=False)
-    usage = read_json(USAGE_DATA, required=False)
+    if cores.get("basis") != "reserved":
+        print(f"warning: {cores_path} packs what the pods {cores.get('basis')}, not what they reserve",
+              file=sys.stderr)
+    prices = read_json(os.path.expanduser(args.prices))
+    reserved_from = read_json(SIZE_PODS).get("reserved_from") if os.path.exists(SIZE_PODS) else None
     with open(TEMPLATE) as f:
         template = f.read()
     if template.count(PLACEHOLDER) != 1:
         sys.exit(f"{TEMPLATE} must contain {PLACEHOLDER} exactly once")
     # Escaping "<" keeps the data from ever closing its <script> element early.
-    data = json.dumps(page_data(cores, profiles, usage), ensure_ascii=False).replace("<", "\\u003c")
+    data = json.dumps(page_data(cores, prices, reserved_from), ensure_ascii=False).replace("<", "\\u003c")
     target = os.path.expanduser(args.output)
     with open(target, "w") as f:
         f.write(template.replace(PLACEHOLDER, data))
-    print(f"wrote {target}: {len(cores['sizes'])} sizes", file=sys.stderr)
+    print(f"wrote {target}: {len(cores['sizes'])} sizes, prices for {len(prices['hourly'])} regions", file=sys.stderr)
 
 
 if __name__ == "__main__":
