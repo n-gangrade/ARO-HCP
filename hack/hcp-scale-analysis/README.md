@@ -17,8 +17,7 @@ hosted-cluster size, plus a note on how much to trust each size.
 | `pack_clusters.py` | Works out how many control-plane machines, and so cores of quota, a mix of hosted clusters needs, by packing their pods from `size-pods.json` |
 | `check_packing.py` | Checks that `pack_clusters.py`'s packings follow the rules, and compares them with the fewest machines possible |
 | `cores_per_cluster.py` | Works out the cores one cluster of each size takes on a full management cluster, into `cores-per-cluster.json`: the numbers for the PM page |
-| `fetch_prices.py` | Fetches Azure's list price of a control-plane machine in every region, into `machine-prices.json`, for the PM page's costs |
-| `build_pm_page.py` | Builds the PM page, `pm-page.html`, from `pm-page-template.html`, `cores-per-cluster.json` and `machine-prices.json` |
+| `build_pm_page.py` | Builds the PM page, `pm-page.html`, from `pm-page-template.html` and `cores-per-cluster.json` |
 | `pm-page-template.html` | The PM page's layout and code, without the numbers |
 | `run-notes.json` | Hand-written trust note for each run (`good`, `caveats` or `low`, and why) |
 | `container-usage.json` | Generated: per-container usage of every run and what Kubernetes reserved, with the run's trust note. The input for comparing sizes and for `component_requests.py` and `simulator_profiles.py` |
@@ -26,8 +25,7 @@ hosted-cluster size, plus a note on how much to trust each size.
 | `size-pods.json` | Generated: the pods one cluster of each t-shirt size runs, with what each copy reserves today and what it uses, for simulating how clusters pack onto machines |
 | `size-cores.json` | Generated: one cluster's own, shared and total cores for each size, by the scheduling simulator |
 | `cores-per-cluster.json` | Generated: how many clusters of each size fit on a management cluster, and the cores one cluster takes on a full one. The input for the PM page |
-| `machine-prices.json` | Generated: Azure's list price of a control-plane machine in every region. The input for the PM page's costs |
-| `pm-page.html` | Generated: the PM page, a single self-contained file that works out the cores to request, and their cost, per region and customer |
+| `pm-page.html` | Generated: the PM page, a single self-contained file that works out the cores to request per region and customer |
 | `graphs/` | Generated: CPU and memory graphs and a `summary.json` for every run |
 
 The older scripts here (`extract_all.py`, `extract_kas.py`, `plot_kas.py`, `plot_kas_sum.py`, `report_replicas.py`,
@@ -65,10 +63,8 @@ your Python (for example `PY=../scheduling-simulator/venv/bin/python`):
 
        $PY cores_per_cluster.py
 
-6. Rebuild the PM page from it and the machine prices. To update the prices first, run `fetch_prices.py`, which
-   needs a network connection:
+6. Rebuild the PM page from it:
 
-       $PY fetch_prices.py
        $PY build_pm_page.py
 
 7. Rebuild the simulator's input from the data file. If a new run tests a size that another run already tests, say
@@ -81,7 +77,7 @@ your Python (for example `PY=../scheduling-simulator/venv/bin/python`):
        $PY size_cores.py
 
 9. Commit `graphs/`, `run-notes.json`, `container-usage.json`, `size-pods.json`, `cores-per-cluster.json`,
-   `machine-prices.json`, `pm-page.html`, `simulator-profiles.json` and `size-cores.json`.
+   `pm-page.html`, `simulator-profiles.json` and `size-cores.json`.
 
 To look at one run in detail:
 
@@ -441,7 +437,7 @@ server, network connection or other files. Add a row for each customer, region, 
 and it shows, using `cores-per-cluster.json`'s numbers:
 
 - **Cores to request per region:** the clusters' own cores, their amortized cores and the total, rounded up to whole
-  cores; how many full management clusters' worth they take; and what they cost a month.
+  cores, and how many full management clusters' worth they take.
 - **Per customer and region:** the same, split by customer.
 - **Cores per cluster:** what one cluster of each size takes on a full management cluster, and what limits how many
   fit.
@@ -451,13 +447,7 @@ Its settings are the management cluster's (see "Cores per cluster on a full mana
 machines per zone, the cores of its other machines and the most hosted clusters on one. They start at
 `cores-per-cluster.json`'s placeholders, and can be changed on the page. As the page can't run the solver, its
 control-plane machines are always the 32-core machines the numbers were worked out for, with 1 to 20 per zone.
-
-Costs use Azure's list price of a `Standard_E32ds_v6` machine (the control-plane machine the public config names) in
-each row's region, from `machine-prices.json`, per core, for every core, 730 hours a month: Linux pay-as-you-go,
-without discounts such as reservations. Production uses other machine types in some regions. Regions are matched by
-their Azure name, such as `eastus2` or "East US 2"; for a region the price list doesn't have, the page uses eastus2's
-price and says so. A price per core-hour on the page replaces them all. `fetch_prices.py` updates the prices from
-Azure's public Retail Prices API.
+Regions are free text, used to group the rows; "East US 2" and "eastus2" count as the same region.
 
 To change the layout, edit `pm-page-template.html` and rebuild; `build_pm_page.py` fills in the numbers where it says
 `__PAGE_DATA__`. To give it production's settings without committing them, rebuild `cores-per-cluster.json` and the

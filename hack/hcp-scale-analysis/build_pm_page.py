@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """Build the PM page: one self-contained HTML file that works out the cores customers' hosted clusters need.
 
-Reads cores-per-cluster.json (from cores_per_cluster.py), machine-prices.json (from fetch_prices.py) and size-pods.json
-(for the test run its reservations come from), puts them into pm-page-template.html and writes pm-page.html, all next
-to this script by default. The page needs no server or network connection: open it in a browser, or send the file to
-someone. Rerun this whenever those files change.
+Reads cores-per-cluster.json (from cores_per_cluster.py) and size-pods.json (for the test run its reservations come
+from), puts them into pm-page-template.html and writes pm-page.html, all next to this script by default. The page
+needs no server or network connection: open it in a browser, or send the file to someone. Rerun this whenever those
+files change.
 
 On the page, PMs add a row for each customer, region, cluster size and number of clusters, and get the cores to
 request per region and per customer: each cluster's own share of a full management cluster's control-plane machines
-and its amortized share of what's there for all the clusters, and what they cost a month at Azure's list prices. The
-management cluster's settings are on the page, with this file's numbers as defaults.
+and its amortized share of what's there for all the clusters. The management cluster's settings are on the page, with
+cores-per-cluster.json's as defaults.
 
 Usage:
-  python3 build_pm_page.py [--cores FILE] [--prices FILE] [--output FILE]
+  python3 build_pm_page.py [--cores FILE] [--output FILE]
 """
 import argparse
 import json
@@ -21,13 +21,10 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_CORES = os.path.join(HERE, "cores-per-cluster.json")
-DEFAULT_PRICES = os.path.join(HERE, "machine-prices.json")
 DEFAULT_OUTPUT = os.path.join(HERE, "pm-page.html")
 TEMPLATE = os.path.join(HERE, "pm-page-template.html")
 SIZE_PODS = os.path.join(HERE, "size-pods.json")
 PLACEHOLDER = "__PAGE_DATA__"
-HOURS_PER_MONTH = 730  # Azure's own monthly figure
-FALLBACK_REGION = "eastus2"  # the price used for a region the price list doesn't have
 RESOURCE_NAMES = {"cpu_cores": "CPU", "memory_gib": "memory", "swift_nics": "network cards (SWIFT NICs)",
                   "pods": "pod slots"}
 
@@ -38,8 +35,6 @@ def parse_args():
     parser.add_argument("--cores", default=DEFAULT_CORES,
                         help="cores per cluster from cores_per_cluster.py (default: cores-per-cluster.json next to "
                              "this script)")
-    parser.add_argument("--prices", default=DEFAULT_PRICES,
-                        help="machine prices from fetch_prices.py (default: machine-prices.json next to this script)")
     parser.add_argument("--output", default=DEFAULT_OUTPUT,
                         help="page to write (default: pm-page.html next to this script)")
     return parser.parse_args()
@@ -60,7 +55,7 @@ def others_text(other_machines):
     return " and ".join(parts)
 
 
-def notes(cores, prices, reserved_from):
+def notes(cores, reserved_from):
     """The page's "How these numbers are worked out" list."""
     settings = cores["settings"]
     room = settings["room_per_machine"]
@@ -85,10 +80,6 @@ def notes(cores, prices, reserved_from):
         "and any control-plane room left unused because of the limit on clusters per management cluster.",
         "Quota is planned per management cluster, for all its machines at their largest, so a cluster's cores are an "
         "average share: a region whose management clusters are full needs a whole new one at once.",
-        f"Costs: Azure's list price of a {prices['machine']} machine in the row's region, per core, for every core, "
-        f"{HOURS_PER_MONTH} hours a month ({prices['purchase_model']}, retrieved {prices['retrieved']}). Production "
-        f"uses other machine types in some regions, and discounts such as reservations aren't included. For a region "
-        f"the price list doesn't have, the page uses {FALLBACK_REGION}'s price.",
         "The settings above are placeholders, to replace with production's own numbers from its deployment "
         "configuration.",
         "Not included: spare room for upgrades, a zone failure or new clusters; the cluster autoscaler of clusters "
@@ -96,15 +87,12 @@ def notes(cores, prices, reserved_from):
         "The numbers assume machines are packed as tightly as the rules allow, which production's scheduler and "
         "placement may not manage for large and bigger clusters. Mixing sizes on a management cluster packs a little "
         "better than their shares add up to.",
-        "These are estimates for planning, not an exact bill.",
+        "These are estimates for planning, not an exact count.",
     ]
 
 
-def page_data(cores, prices, reserved_from):
+def page_data(cores, reserved_from):
     settings = cores["settings"]
-    per_core_hour = {region: price / prices["cores"] for region, price in prices["hourly"].items()}
-    if FALLBACK_REGION not in per_core_hour:
-        sys.exit(f"the price list has no price for {FALLBACK_REGION}, the page's fallback region")
     return {
         "sizes": [{
             "size": size["size"],
@@ -121,14 +109,7 @@ def page_data(cores, prices, reserved_from):
             "other_text": others_text(settings["other_machines"]),
             "limit": settings["limit"],
         },
-        "prices": {
-            "machine": prices["machine"],
-            "retrieved": prices["retrieved"],
-            "per_core_hour": per_core_hour,
-            "fallback_region": FALLBACK_REGION,
-        },
-        "hours_per_month": HOURS_PER_MONTH,
-        "notes": notes(cores, prices, reserved_from),
+        "notes": notes(cores, reserved_from),
     }
 
 
@@ -141,18 +122,17 @@ def main():
     if cores.get("basis") != "reserved":
         print(f"warning: {cores_path} packs what the pods {cores.get('basis')}, not what they reserve",
               file=sys.stderr)
-    prices = read_json(os.path.expanduser(args.prices))
     reserved_from = read_json(SIZE_PODS).get("reserved_from") if os.path.exists(SIZE_PODS) else None
     with open(TEMPLATE) as f:
         template = f.read()
     if template.count(PLACEHOLDER) != 1:
         sys.exit(f"{TEMPLATE} must contain {PLACEHOLDER} exactly once")
     # Escaping "<" keeps the data from ever closing its <script> element early.
-    data = json.dumps(page_data(cores, prices, reserved_from), ensure_ascii=False).replace("<", "\\u003c")
+    data = json.dumps(page_data(cores, reserved_from), ensure_ascii=False).replace("<", "\\u003c")
     target = os.path.expanduser(args.output)
     with open(target, "w") as f:
         f.write(template.replace(PLACEHOLDER, data))
-    print(f"wrote {target}: {len(cores['sizes'])} sizes, prices for {len(prices['hourly'])} regions", file=sys.stderr)
+    print(f"wrote {target}: {len(cores['sizes'])} sizes", file=sys.stderr)
 
 
 if __name__ == "__main__":

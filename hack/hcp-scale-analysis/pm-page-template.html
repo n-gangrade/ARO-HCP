@@ -34,9 +34,8 @@
 <header>
   <h1>Hosted control plane cores estimate</h1>
   <p class="muted">How many cores of Azure quota ARO-HCP needs to run customers' hosted control planes, per region
-    and per customer: each cluster's own compute and its amortized share of what all the clusters share, and what
-    they cost at Azure's list prices. Add a row for each customer, region and cluster size; everything updates as you
-    type.</p>
+    and per customer: each cluster's own compute and its amortized share of what all the clusters share. Add a row for
+    each customer, region and cluster size; everything updates as you type.</p>
 </header>
 
 <main>
@@ -69,9 +68,6 @@
       <label for="limit">Most hosted clusters per management cluster
         <span class="help" id="limit-help"></span></label>
       <input type="number" id="limit" min="1" step="1">
-      <label for="price">Price per core-hour, in US dollars
-        <span class="help" id="price-help"></span></label>
-      <input type="number" id="price" min="0" step="0.001" placeholder="by region">
       <p><button type="button" id="reset-settings" class="no-print">Back to the defaults</button></p>
     </details>
   </section>
@@ -92,7 +88,6 @@
           <th scope="col" class="num">Total cores</th>
           <th scope="col" class="num">Cores to request</th>
           <th scope="col" class="num">Management clusters</th>
-          <th scope="col" class="num">Cost per month</th>
         </tr>
       </thead>
       <tbody></tbody>
@@ -112,7 +107,7 @@
           <th scope="col" class="num">Own cores</th>
           <th scope="col" class="num">Amortized cores</th>
           <th scope="col" class="num">Total cores</th>
-          <th scope="col" class="num">Cost per month</th>
+          <th scope="col" class="num">Cores to request</th>
         </tr>
       </thead>
       <tbody></tbody>
@@ -131,7 +126,6 @@
           <th scope="col" class="num">Own cores</th>
           <th scope="col" class="num">Amortized cores</th>
           <th scope="col" class="num">Total cores</th>
-          <th scope="col" class="num" id="sizes-cost-header">Cost per month</th>
         </tr>
       </thead>
       <tbody></tbody>
@@ -152,18 +146,14 @@
   const SIZES = DATA.sizes;
   const BY_SIZE = new Map(SIZES.map((s) => [s.size, s]));
   const MOST_PER_ZONE = SIZES[0].clusters_that_fit.length;
-  const PRICES = DATA.prices.per_core_hour;
-  const FALLBACK = DATA.prices.fallback_region;
   const ONE_DECIMAL = new Intl.NumberFormat("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   const TWO_DECIMALS = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const WHOLE = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
-  const DOLLARS = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
   const inputRows = document.querySelector("#inputs tbody");
   const controls = {
     machines: document.getElementById("machines-per-zone"),
     other: document.getElementById("other-cores"),
     limit: document.getElementById("limit"),
-    price: document.getElementById("price"),
   };
 
   function cores(n) { return ONE_DECIMAL.format(n); }
@@ -188,7 +178,8 @@
                              : (s.nodes_from === 0 ? "up to " : s.nodes_from + " to ") + s.nodes_to + " nodes") + ")";
   }
 
-  // A whole number between low and high (no upper limit if high is null), or a number of 0 or more if whole is false.
+  // The control's number if it's from low to high (no upper limit if high is null), and whole if `whole` is true;
+  // otherwise the fallback.
   function readNumber(control, fallback, low, high, whole) {
     const text = control.value.trim();
     const n = Number(text);
@@ -200,14 +191,10 @@
 
   function readSettings() {
     const d = DATA.defaults;
-    const priceText = controls.price.value.trim();
-    const price = priceText === "" ? null : readNumber(controls.price, null, 0, null, false);
-    if (priceText === "") controls.price.setAttribute("aria-invalid", "false");
     return {
       machinesPerZone: readNumber(controls.machines, d.machines_per_zone, 1, MOST_PER_ZONE, true),
       otherCores: readNumber(controls.other, d.other_cores, 0, null, false),
       limit: readNumber(controls.limit, d.limit, 1, null, true),
-      price,
     };
   }
 
@@ -225,12 +212,6 @@
       total,
       limitedBy: held < fit ? "the limit of " + WHOLE.format(settings.limit) + " clusters" : s.runs_out_of,
     };
-  }
-
-  function pricePerCoreHour(region, settings) {
-    if (settings.price !== null) return { price: settings.price, listed: true };
-    const price = PRICES[regionKey(region)];
-    return price === undefined ? { price: PRICES[FALLBACK], listed: false } : { price, listed: true };
   }
 
   function addRow(values) {
@@ -291,17 +272,15 @@
       const key = keyOf(r);
       let g = groups.get(key);
       if (!g) {
-        g = { labels: labelsOf(r), clusters: 0, own: 0, amortized: 0, total: 0, share: 0, cost: 0 };
+        g = { labels: labelsOf(r), clusters: 0, own: 0, amortized: 0, total: 0, share: 0 };
         groups.set(key, g);
       }
       const one = perCluster(r.size, settings);
-      const total = r.count * one.total;
       g.clusters += r.count;
       g.own += r.count * one.own;
       g.amortized += r.count * one.amortized;
-      g.total += total;
+      g.total += r.count * one.total;
       g.share += r.count / one.held;
-      g.cost += total * pricePerCoreHour(r.region, settings).price * DATA.hours_per_month;
     }
     return [...groups.values()].sort((a, b) => a.labels.join("\u0000").localeCompare(b.labels.join("\u0000")));
   }
@@ -324,8 +303,7 @@
     const d = DATA.defaults;
     document.getElementById("settings-summary").textContent = "Settings (placeholders): " +
       settings.machinesPerZone + " control-plane machines per zone, " + WHOLE.format(settings.otherCores) +
-      " cores of other machines, at most " + WHOLE.format(settings.limit) + " clusters per management cluster, " +
-      (settings.price === null ? "list prices by region" : "$" + settings.price + " per core-hour");
+      " cores of other machines, at most " + WHOLE.format(settings.limit) + " clusters per management cluster";
     document.getElementById("machines-help").textContent = "1 to " + MOST_PER_ZONE + "; the default, " +
       d.machines_per_zone + ", is what the 49-node test's management cluster had. The machines have " +
       DATA.machine_cores + " cores each.";
@@ -334,9 +312,6 @@
       WHOLE.format(d.other_cores) + ", is the 49-node test's " + d.other_text + ".";
     document.getElementById("limit-help").textContent = "The default, " + WHOLE.format(d.limit) + ", is Clusters " +
       "Service's limit; the Service Lifecycle team's capacity alert treats 60 as a management cluster's limit.";
-    document.getElementById("price-help").textContent = "Leave it blank to use Azure's list price of a " +
-      DATA.prices.machine + " machine in each row's region (Linux, pay-as-you-go, retrieved " +
-      DATA.prices.retrieved + ").";
   }
 
   function update() {
@@ -348,8 +323,8 @@
     fill(document.querySelector("#by-region tbody"), regions.map((g) => [
       cell(g.labels[0]), cell(WHOLE.format(g.clusters), "num"), cell(cores(g.own), "num"),
       cell(cores(g.amortized), "num"), cell(cores(g.total), "num"), cell(WHOLE.format(toRequest(g.total)), "num"),
-      cell(TWO_DECIMALS.format(g.share), "num"), cell(DOLLARS.format(g.cost), "num"),
-    ]), 8, "Add clusters above to see the totals.");
+      cell(TWO_DECIMALS.format(g.share), "num"),
+    ]), 7, "Add clusters above to see the totals.");
     const foot = document.querySelector("#by-region tfoot");
     foot.replaceChildren();
     if (regions.length) {
@@ -358,7 +333,7 @@
         cell("All regions"), cell(WHOLE.format(sum("clusters")), "num"), cell(cores(sum("own")), "num"),
         cell(cores(sum("amortized")), "num"), cell(cores(sum("total")), "num"),
         cell(WHOLE.format(regions.reduce((total, g) => total + toRequest(g.total), 0)), "num"),
-        cell(TWO_DECIMALS.format(sum("share")), "num"), cell(DOLLARS.format(sum("cost")), "num"),
+        cell(TWO_DECIMALS.format(sum("share")), "num"),
       ]));
     }
 
@@ -376,22 +351,18 @@
                         (r) => [customerLabel(r), regionLabel(r)], settings);
     fill(document.querySelector("#by-customer tbody"), pairs.map((g) => [
       cell(g.labels[0]), cell(g.labels[1]), cell(WHOLE.format(g.clusters), "num"), cell(cores(g.own), "num"),
-      cell(cores(g.amortized), "num"), cell(cores(g.total), "num"), cell(DOLLARS.format(g.cost), "num"),
+      cell(cores(g.amortized), "num"), cell(cores(g.total), "num"), cell(WHOLE.format(toRequest(g.total)), "num"),
     ]), 7, "Add clusters above to see the totals.");
 
-    const fallbackPrice = settings.price === null ? PRICES[FALLBACK] : settings.price;
     document.getElementById("sizes-intro").textContent = "What one hosted cluster of each size takes on a full " +
       "management cluster with these settings. A size covers its number of nodes, infra nodes as well as workers.";
-    document.getElementById("sizes-cost-header").textContent = settings.price === null
-      ? "Cost per month (" + FALLBACK + ")" : "Cost per month";
     fill(document.querySelector("#sizes tbody"), SIZES.map((s) => {
       const one = perCluster(s, settings);
       return [
         cell(sizeLabel(s)), cell(WHOLE.format(one.held), "num"), cell(one.limitedBy), cell(cores(one.own), "num"),
         cell(cores(one.amortized), "num"), cell(cores(one.total), "num"),
-        cell(DOLLARS.format(one.total * fallbackPrice * DATA.hours_per_month), "num"),
       ];
-    }), 7, "No sizes.");
+    }), 6, "No sizes.");
 
     const notices = document.getElementById("notices");
     notices.replaceChildren();
@@ -405,11 +376,6 @@
                          " counted: \u201cHow many\u201d must be a whole number of 0 or more.");
     if (missingSize) notice(missingSize + (missingSize === 1 ? " row isn't" : " rows aren't") +
                             " counted yet: choose a cluster size.");
-    const unpriced = [...new Set(rows.filter((r) => r.count > 0 && !pricePerCoreHour(r.region, settings).listed)
-                                     .map(regionLabel))];
-    if (unpriced.length) notice("No list price for " + unpriced.join(", ") + ", so " +
-      (unpriced.length === 1 ? "its costs use " : "their costs use ") + FALLBACK + "'s price. Give the region's " +
-      "Azure name, such as eastus2 or \u201cEast US 2\u201d.");
     if (Object.values(controls).some((c) => c.getAttribute("aria-invalid") === "true")) {
       notice("A setting isn't valid, so its default is used: see the settings above.");
     }
@@ -421,7 +387,6 @@
     controls.machines.value = String(d.machines_per_zone);
     controls.other.value = String(d.other_cores);
     controls.limit.value = String(d.limit);
-    controls.price.value = "";
   }
 
   for (const control of Object.values(controls)) control.addEventListener("input", update);
