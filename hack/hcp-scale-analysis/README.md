@@ -223,52 +223,65 @@ machines have CPU to spare: the 49-node cluster used 5.3 cores typically (p50) a
 against 4.555 reserved, and at busy moments the 30- and 60-node clusters used 4.6 and 4.4 cores and the 120- and
 250-node ones 5.9 and 11.7, against about 4.3 reserved, and the 500-node one 26.1 (though that run has low trust).
 
-## Packing a customer's clusters
+## Packing clusters onto machines
 
 `pack_clusters.py` works out how many control-plane machines, and so how many cores of quota, a mix of hosted
-clusters needs. It's meant to replace `size_cores.py` and the scheduling simulator for the PM page, which still uses
-them. For example:
+clusters needs on machines of its own. It's meant to replace `size_cores.py` and the scheduling simulator for the PM
+page, which still uses them. For example:
 
     $PY pack_clusters.py small=10 large=2
     $PY pack_clusters.py --per-set
 
 It packs every pod of the clusters (the reserved pods in `size-pods.json`, or the used ones with `--basis used`) onto
 production's 32-core control-plane machines, spread over 3 availability zones, by the rules production's scheduler
-follows:
+follows. The public config names `Standard_E32ds_v6` for these machines (`mgmt.aks.userAgentPool.vmSize` in
+`config/config.yaml`), but the type can differ by region, and it decides which quota family to request; the packing
+only needs its cores, memory and network cards.
 
 - **Zones:** the copies of a component with more than one copy run in different zones, so on different machines.
   A component with one copy can run in any zone.
 - **Room:** a pod fits on a machine if what's left of the machine's CPU, memory, SWIFT NICs and pod slots covers
   what the pod reserves. Each machine has 32 cores, 251.7 GiB of memory (what the 49-node run's machines show;
-  Azure lists 256 GiB), 7 SWIFT NICs (`fleet/pkg/azure/skucache/skucache.go`) and 225 pod slots (`maxPods` in
-  `dev-infrastructure/modules/aks-cluster-base.bicep`). It keeps back 3 cores and 7550 MiB for the system (the
-  kubelet's system reservation, `mgmt-fixes/deploy/kubelet-ds`), and room for the 14 helper pods every
-  control-plane machine runs: in the 49-node run, each of its 18 ran the same 14, kube-system's network, storage,
-  monitoring and security agents, arobit's log forwarder and velero's node agent. What those reserve isn't in the
-  data, so the packing uses the scheduling simulator's measurement of what such pods used on a production
-  management cluster, 0.468 cores and 3.5 GiB per machine (`node_overhead_*` in
+  Azure lists 256 GiB), 7 SWIFT NICs (its network cards other than the primary one, which mgmt-agent counts and
+  offers to the scheduler, `countSwiftNICs` in `mgmt-agent/pkg/controller/controller.go`; `secondaryNicCount` in
+  `config/config.yaml`) and 225 pod slots (`maxPods` in `dev-infrastructure/modules/aks-cluster-base.bicep`). It
+  keeps back 3 cores and 7550 MiB for the system (the kubelet's system reservation, `mgmt-fixes/deploy/kubelet-ds`),
+  and room for the 14 helper pods every control-plane machine runs: in the 49-node run, each of its 18 ran the same
+  14, kube-system's network, storage, monitoring and security agents, arobit's log forwarder and velero's node agent.
+  What those reserve isn't in the data, so the packing uses the scheduling simulator's measurement of what such pods
+  used on a production management cluster, 0.468 cores and 3.5 GiB per machine (`node_overhead_*` in
   `../scheduling-simulator/optimize/engine.py`); in the 49-node run, the pods outside the control planes used 2.2 to
-  4.8 GiB per machine. That leaves 28.5 cores, 240.8 GiB, 7 SWIFT NICs and 211 pod slots per machine.
+  4.8 GiB per machine. That leaves 28.532 cores, 240.819 GiB, 7 SWIFT NICs and 211 pod slots per machine.
 
-How it packs: first the components with a copy in every zone, then the rest, each biggest first. Each copy goes to a
-zone where it fits on a machine already there, the least full first, and there on the machine with the most room
-left, as production's scheduler does, which keeps the machines evenly full. It adds a machine only when a copy fits
-on none. It reports the machines in each zone, the cores to request for them (whole machines), and how full each
-kind of room is.
+How it packs: the sizes in a fixed order, small to xxlarge, so the answer doesn't depend on the order they're given;
+first the components with a copy in every zone, then the rest, each biggest first. Each copy goes to a zone where it
+fits on a machine already there, the least full first, and there on the machine with the most room left in what the
+copy needs, which keeps a zone's machines from filling up lopsidedly, one out of memory and another out of pod slots.
+It adds a machine only when a copy fits on none. It reports the machines in each zone, the cores to request for them
+(whole machines), and how full each kind of room is. That isn't how production's scheduler places pods: HyperShift
+prefers to keep a cluster's pods together, and in the 49-node run, 37 to 44 of each complete cluster's 60 to 67 pods
+were on one machine.
 
 One machine in each zone (3 machines, 96 cores) holds 7 small or 7 medium clusters, as their SWIFT NICs run out
 first: every cluster's router puts a copy, and a SWIFT NIC, in every zone. It holds 5 large, 2 xlarge or 1
 xxlarge cluster, as memory runs out first. So 10 small clusters need 6 machines, 192 cores, although their pods
 reserve 45.5 cores; and a single cluster of any size needs 3 machines, one in each zone.
 
-**How close it comes to the fewest machines possible:** `check_packing.py` checks that every packing follows the
-rules, and works out the fewest machines possible with an exact solver, to compare. In 155 cases, no packing broke a
-rule. It needed the fewest machines for every mix of small and medium clusters (40 of 40), and for 66 of 75 counts
-of one size alone (up to 15 clusters); the other 9, with 8 or more large, xlarge or xxlarge clusters, needed 1 or 2
-more. For mixes with larger sizes, it needed the fewest in 17 of 40, and up to 4 more in the rest, as the fewest
-can take a different number of machines in each zone. No packing that follows the rules needs fewer than the
-fewest, so it never asks for too few machines, and production's scheduler, which places clusters one at a time as
-they come, doesn't pack as tightly either. Rerun `check_packing.py` after changing the packing (about 4 minutes).
+**How close it comes to the fewest machines possible:** `check_packing.py` checks every packing against the rules,
+and works out the fewest machines possible with an exact solver, doing the same arithmetic, to compare. In 155
+cases, no packing broke a rule or disagreed with the solver. It needed the fewest machines for every mix of small and
+medium clusters (40 of 40), and for 66 of 75 counts of one size alone (1 to 15 clusters); the other 9, with 8 or more
+large, xlarge or xxlarge clusters, needed 1 or 2 more. Of 40 mixes with larger sizes, it needed the fewest in 18 and
+1 to 4 more in 18; the solver ran out of time on the other 4. The gap grows with the number of larger clusters: 20
+large clusters need 14 machines here and 12 at the fewest, 30 need 21 and 17. Adding a cluster can even lower the
+answer: 14 large clusters need 11 machines here, 15 only 9. No packing that follows the rules needs fewer than the
+fewest, so it never comes in under that. Rerun `check_packing.py` after changing the packing (about 11 minutes); how
+many cases the solver finishes in time can vary from run to run.
+
+**It packs the clusters given on their own, which production doesn't.** Production's placement controller
+(`selectByCapacity` in `backend/pkg/controllers/cluster/placement/placement_controller.go`) puts each new hosted
+cluster on the management cluster with the most free SWIFT NICs, counting each control-plane pool at its largest
+size, and doesn't look at CPU or memory yet. So a customer's clusters share machines with other customers'.
 
 Not included yet:
 
@@ -277,6 +290,9 @@ Not included yet:
   emptier than this packing: in the 49-node run, its management cluster ran 11 clusters with routers on 18
   control-plane machines, 6 in each zone, none using more than 3 of its 7 SWIFT NICs, where this packing needs 6
   machines.
+- **Shared pods on the control-plane machines:** besides each machine's 14 helper pods, 23 other pods ran on the
+  49-node run's 18 control-plane machines, such as the HyperShift operator's, mgmt-agent's, monitoring's and one
+  cluster's ACM agents.
 - Spare room for upgrades, a zone failure or new clusters.
 - The cluster autoscaler of clusters that use autoscaling (`not_included` in `size-pods.json`), and the kubelet's
   eviction threshold, under 1 GiB of each machine's memory.

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""How many management-cluster machines, and so how many cores of quota, a customer's hosted clusters need.
+"""How many management-cluster machines, and so how many cores of quota, a mix of hosted clusters needs.
 
 Reads the pods each t-shirt size runs from size-pods.json (written by size_pods.py) and packs every pod of
-the clusters given onto production's control-plane machines, spread over 3 availability zones. Then it
-reports the machines in each zone, the cores to request for them (whole machines), and how full each kind
+the clusters given onto production's 32-core control-plane machines, spread over 3 availability zones. Then
+it reports the machines in each zone, the cores to request for them (whole machines), and how full each kind
 of room is.
 
 The rules production's scheduler follows:
@@ -13,18 +13,24 @@ The rules production's scheduler follows:
   the pod reserves, and one slot. What's left starts from ROOM: the machine's own, less the kubelet's system
   reservation and the helper pods every machine runs.
 
-How it packs: first the components with a copy in every zone, then the rest, each biggest first. Each copy
-goes to a zone where it fits on a machine already there, the least full in what the copy needs first, and
-there on the machine with the most room left, as production's scheduler does, which keeps the machines
-evenly full. It adds a machine only when a copy fits on none.
+How it packs: the sizes in a fixed order, small to xxlarge, so the answer doesn't depend on the order they're
+given; first the components with a copy in every zone, then the rest, each biggest first. Each copy goes to a
+zone where it fits on a machine already there, the least full in what the copy needs first, and there on the
+machine with the most room left in what the copy needs, which keeps a zone's machines from filling up
+lopsidedly, one out of memory and another out of pod slots. It adds a machine only when a copy fits on none.
+That isn't how production's scheduler places pods: HyperShift prefers to keep a cluster's pods together.
 
-That isn't always the fewest machines possible. Compared with an exact solver (check_packing.py), it needs
-the fewest for small and medium clusters, and up to a few more for mixes with larger ones, as the fewest can
-take a different number of machines in each zone. No packing that follows the rules needs fewer than the
-fewest, so it never asks for too few, and production's scheduler, which places clusters one at a time as
-they come, doesn't pack as tightly either. Not included:
+It isn't always the fewest machines possible either. Compared with an exact solver (check_packing.py), it
+needs the fewest for small and medium clusters, and more for mixes with larger ones, the more so the more
+larger clusters there are; adding a cluster can even lower the answer. No packing that follows the rules
+needs fewer machines than the fewest, so it never comes in under that.
+
+It packs the clusters given on their own, which production doesn't: its placement controller puts each new
+hosted cluster on the management cluster with the most free SWIFT NICs, so a customer's clusters share
+machines with other customers'. Not included either:
 - the machines every management cluster keeps whatever its load: its system and infra pools, and the
   minimum number of machines production keeps in each of its control-plane pools;
+- the shared pods that run on some control-plane machines, such as the HyperShift operator's;
 - spare room for upgrades, a zone failure or new clusters;
 - the cluster autoscaler, which clusters that use autoscaling run (not_included in size-pods.json);
 - the kubelet's eviction threshold, under 1 GiB of each machine's memory.
@@ -37,21 +43,25 @@ Usage:
 """
 import argparse
 import json
+import math
 import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_PODS = os.path.join(HERE, "size-pods.json")
 ZONES = 3
-MACHINE = "Standard_E32ds_v6"  # mgmt.aks.userAgentPool.vmSize in config/config.yaml
-MACHINE_CORES = 32             # what one machine counts against the quota
+# Production's control-plane machines: the public config names Standard_E32ds_v6 (mgmt.aks.userAgentPool.vmSize in
+# config/config.yaml), but the type can differ by region. It decides which quota family to request; the packing
+# only needs its cores, memory and network cards.
+MACHINE = "32-core control-plane machine"
+MACHINE_CORES = 32  # what one machine counts against the quota
 RESOURCES = ("cpu_cores", "memory_gib", "swift_nics", "pods")
 RESOURCE_NAMES = {"cpu_cores": "CPU (cores)", "memory_gib": "memory (GiB)", "swift_nics": "SWIFT NICs",
                   "pods": "pod slots"}
 # What one machine has:
 # - memory: what the 49-node run's control-plane machines show (node_memory_MemTotal_bytes); Azure lists 256 GiB
-# - SWIFT NICs: 8 network cards, one kept for the machine itself (fleet/pkg/azure/skucache/skucache.go, and
-#   secondaryNicCount in config/config.yaml)
+# - SWIFT NICs: the machine's network cards other than its primary one, which mgmt-agent counts and offers to the
+#   scheduler (countSwiftNICs in mgmt-agent/pkg/controller/controller.go): 7 (secondaryNicCount in config/config.yaml)
 # - pods: maxPods of the control-plane pools (dev-infrastructure/modules/aks-cluster-base.bicep)
 MACHINE_HAS = {"cpu_cores": 32.0, "memory_gib": 251.7, "swift_nics": 7, "pods": 225}
 # The kubelet's system reservation on every machine (mgmt-fixes/deploy/kubelet-ds)
@@ -63,7 +73,10 @@ SYSTEM_RESERVED = {"cpu_cores": 3.0, "memory_gib": 7550 / 1024, "swift_nics": 0,
 # such pods used on a production management cluster; in the 49-node run, the pods outside the control planes used
 # 2.2 to 4.8 GiB per machine.
 HELPER_PODS = {"cpu_cores": 0.468, "memory_gib": 3592 / 1024, "swift_nics": 0, "pods": 14}
-ROOM = {resource: MACHINE_HAS[resource] - SYSTEM_RESERVED[resource] - HELPER_PODS[resource] for resource in RESOURCES}
+# What's left for control-plane pods, rounded down to thousandths, as precise as size-pods.json's numbers, so that
+# check_packing.py can repeat the arithmetic exactly in whole thousandths.
+ROOM = {resource: math.floor((MACHINE_HAS[resource] - SYSTEM_RESERVED[resource] - HELPER_PODS[resource]) * 1000
+                             + 1e-6) / 1000 for resource in RESOURCES}
 TOLERANCE = 1e-9
 MOST_PER_SET = 100  # --per-set stops counting here
 
@@ -97,7 +110,7 @@ def load_sizes(path, basis):
 
 
 def parse_clusters(texts, sizes):
-    """{size: count} from SIZE=COUNT texts."""
+    """{size: count} from SIZE=COUNT texts, in size order whatever order they're given in."""
     mix = {}
     for text in texts:
         size, _, count = text.partition("=")
@@ -106,7 +119,7 @@ def parse_clusters(texts, sizes):
         if not count.isdigit() or int(count) < 1:
             sys.exit(f"{text}: the count must be a whole number of 1 or more")
         mix[size] = mix.get(size, 0) + int(count)
-    return mix
+    return {size: mix[size] for size in sizes if size in mix}
 
 
 def share(need):
@@ -116,11 +129,11 @@ def share(need):
 
 def units_for(mix, sizes):
     """Every component of every cluster: first those with a copy in every zone, then the rest, each group biggest
-    first by share(); ties keep the clusters' and pods' order. The pods that must be in every zone go first, so
-    the rest can fill the gaps they leave, wherever there's room."""
+    first by share(); ties keep the order of the sizes in size-pods.json, then of the clusters and pods. The pods
+    that must be in every zone go first, so the rest can fill the gaps they leave, wherever there's room."""
     units = []
-    for size, count in mix.items():
-        for number in range(1, count + 1):
+    for size in sizes:
+        for number in range(1, mix.get(size, 0) + 1):
             for pod in sizes[size]:
                 need = {"cpu_cores": pod["cpu_cores"], "memory_gib": pod["memory_gib"],
                         "swift_nics": pod["swift_nics"], "pods": 1}
@@ -143,8 +156,7 @@ def fullness(machine, need):
 
 
 def roomiest(machines, need):
-    """The machine with room for the copy that has the most room left after it, or None. Like production's
-    scheduler, which puts a pod on the machine with the most room left, this keeps a zone's machines evenly full."""
+    """The machine with room for the copy that has the most room left after it, in what the copy needs, or None."""
     candidates = [machine for machine in machines if fits(machine, need)]
     return min(candidates, key=lambda machine: fullness(machine, need)) if candidates else None
 
@@ -161,21 +173,25 @@ def pack(mix, sizes):
     zones = [[] for _ in range(ZONES)]
     for unit in units_for(mix, sizes):
         need = unit["need"]
-        # Copies that must run in different zones go together; other copies are placed one by one.
+        taken = set()  # the machines already running a copy of this component
+        # Copies that must run in different zones go together; other copies are placed one by one, each on a
+        # machine of its own.
         groups = [unit["copies"]] if unit["one_per_zone"] else [1] * unit["copies"]
         for spread in groups:
             if spread > ZONES:
                 sys.exit(f"{unit['component']} has {spread} copies, more than the {ZONES} zones")
-            ranked = sorted(range(ZONES), key=lambda zone: (roomiest(zones[zone], need) is None,
-                                                            load(zones[zone], need), zone))
+            best = [roomiest([machine for machine in machines if id(machine) not in taken], need)
+                    for machines in zones]
+            ranked = sorted(range(ZONES), key=lambda zone: (best[zone] is None, load(zones[zone], need), zone))
             for zone in ranked[:spread]:
-                machine = roomiest(zones[zone], need)
+                machine = best[zone]
                 if machine is None:
                     machine = {"zone": zone + 1, "used": dict.fromkeys(RESOURCES, 0.0), "pods": []}
                     zones[zone].append(machine)
                 for resource in RESOURCES:
                     machine["used"][resource] += need[resource]
                 machine["pods"].append((unit["cluster"], unit["component"]))
+                taken.add(id(machine))
     return zones
 
 
@@ -217,7 +233,7 @@ def per_set(sizes):
 
 
 def print_room():
-    print(f"Room for control-plane pods on one {MACHINE} machine: " + ", ".join(
+    print(f"Room for control-plane pods on one {MACHINE}: " + ", ".join(
         f"{ROOM[resource]:g} {RESOURCE_NAMES[resource]}" if resource in ("swift_nics", "pods")
         else f"{ROOM[resource]:.1f} {RESOURCE_NAMES[resource]}" for resource in RESOURCES))
 
