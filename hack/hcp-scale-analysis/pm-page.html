@@ -33,9 +33,13 @@
 <body>
 <header>
   <h1>Hosted control plane cores estimate</h1>
-  <p class="muted">How many cores of Azure quota ARO-HCP needs to run customers' hosted control planes, per region
-    and per customer: each cluster's own compute and its amortized share of what all the clusters share. Add a row for
-    each customer, region and cluster size; everything updates as you type.</p>
+  <p class="muted">How many cores ARO-HCP needs to run customers' hosted control planes, per region and per customer:
+    each cluster's own compute and its amortized share of what all the clusters share, and the quota a region needs
+    if its management clusters are full. Add a row for each customer, region and cluster size; everything updates as
+    you type.</p>
+  <p class="notice" id="placeholder-banner" hidden>Placeholder settings: these numbers use the size of a test
+    management cluster, not production's. For real quota requests, use a copy of this page built with production's
+    settings.</p>
 </header>
 
 <main>
@@ -57,8 +61,7 @@
     <div id="notices" aria-live="polite"></div>
     <details class="settings" id="settings">
       <summary id="settings-summary"></summary>
-      <p class="muted">The defaults are placeholders, to replace with production's own numbers from its deployment
-        configuration.</p>
+      <p class="muted" id="settings-intro"></p>
       <label for="machines-per-zone">Control-plane machines per availability zone on a full management cluster
         <span class="help" id="machines-help"></span></label>
       <input type="number" id="machines-per-zone" min="1" step="1">
@@ -73,11 +76,12 @@
   </section>
 
   <section>
-    <h2>Cores to request per region</h2>
-    <p class="muted">Own cores are the clusters' share of the management cluster's machines their own control planes run
-      on; amortized cores are their share of what's there for all the clusters, such as the machines that run logging,
-      monitoring and cluster-management agents. Cores to request are rounded up to whole cores. Management clusters is
-      how many full management clusters' worth the clusters take.</p>
+    <h2>Cores needed per region</h2>
+    <p class="muted">Own cores are the clusters' share of the machines their control planes run on; amortized cores
+      are their share of what's there for all the clusters, such as the machines that run logging, monitoring and
+      cluster-management agents. Cores needed are the total rounded up to whole cores, each row on its own, so rows can
+      add up to a little more than a total. Share of a management cluster is how many full management clusters' worth
+      the clusters take; quota if the region is full is that share rounded up to whole management clusters.</p>
     <table id="by-region">
       <thead>
         <tr>
@@ -86,8 +90,9 @@
           <th scope="col" class="num">Own cores</th>
           <th scope="col" class="num">Amortized cores</th>
           <th scope="col" class="num">Total cores</th>
-          <th scope="col" class="num">Cores to request</th>
-          <th scope="col" class="num">Management clusters</th>
+          <th scope="col" class="num">Cores needed</th>
+          <th scope="col" class="num">Share of a management cluster</th>
+          <th scope="col" class="num">Quota if the region is full (cores)</th>
         </tr>
       </thead>
       <tbody></tbody>
@@ -107,7 +112,7 @@
           <th scope="col" class="num">Own cores</th>
           <th scope="col" class="num">Amortized cores</th>
           <th scope="col" class="num">Total cores</th>
-          <th scope="col" class="num">Cores to request</th>
+          <th scope="col" class="num">Cores needed</th>
         </tr>
       </thead>
       <tbody></tbody>
@@ -121,6 +126,8 @@
       <thead>
         <tr>
           <th scope="col">Cluster size</th>
+          <th scope="col" class="num">Cores it reserves</th>
+          <th scope="col" class="num">Memory it reserves (GiB)</th>
           <th scope="col" class="num">Clusters per management cluster</th>
           <th scope="col">Limited by</th>
           <th scope="col" class="num">Own cores</th>
@@ -138,7 +145,7 @@
   </section>
 </main>
 
-<script id="page-data" type="application/json">{"sizes": [{"size": "small", "nodes_from": 0, "nodes_to": 60, "clusters_that_fit": [7, 14, 21, 28, 35, 42, 49, 56, 63, 70, 77, 84, 91, 98, 105, 112, 119, 126, 133, 140], "runs_out_of": "network cards (SWIFT NICs)"}, {"size": "medium", "nodes_from": 61, "nodes_to": 120, "clusters_that_fit": [7, 14, 21, 28, 35, 42, 49, 56, 63, 70, 77, 84, 91, 98, 105, 112, 119, 126, 133, 140], "runs_out_of": "network cards (SWIFT NICs)"}, {"size": "large", "nodes_from": 121, "nodes_to": 252, "clusters_that_fit": [5, 10, 16, 21, 27, 32, 37, 43, 48, 54, 59, 65, 70, 75, 81, 86, 92, 97, 102, 108], "runs_out_of": "memory"}, {"size": "xlarge", "nodes_from": 253, "nodes_to": 360, "clusters_that_fit": [2, 5, 7, 10, 13, 15, 18, 21, 23, 26, 29, 31, 34, 37, 39, 42, 45, 47, 50, 53], "runs_out_of": "memory"}, {"size": "xxlarge", "nodes_from": 361, "nodes_to": null, "clusters_that_fit": [1, 3, 5, 7, 9, 11, 13, 14, 16, 18, 20, 22, 24, 26, 27, 29, 31, 33, 35, 37], "runs_out_of": "memory"}], "machine_cores": 32, "zones": 3, "defaults": {"machines_per_zone": 6, "other_cores": 104, "other_text": "1 system machine with 8 cores and 3 infra machines with 32 cores", "limit": 100}, "notes": ["What a cluster needs: the pods one hosted cluster of each size runs and what each one reserves (its resource requests), from the newest scale test that recorded them (49-node-hcp-raw: OpenShift 4.22.8, 2026-08-14), with each size's memory settings from HyperShift's cluster sizing configuration. A size covers its number of nodes, infra nodes as well as workers.", "How many fit: the most clusters of each size that fit on a full management cluster, worked out by an exact solver and checked pod by pod, by production's rules. Each copy of a component with more than one copy runs in a different availability zone (3 zones), and each 32-core control-plane machine has room for 28.532 cores, 240.819 GiB of memory, 7 network cards (SWIFT NICs: each router copy takes one) and 211 pods, after what it keeps for its system and the helper pods every machine runs. Small and medium clusters run out of network cards first; large and bigger ones run out of memory.", "Own cores: one cluster's share of a full management cluster's control-plane machines, the machines its own control plane runs on: their cores divided by the clusters that fit.", "Amortized cores: one cluster's share of what's there for all the clusters: the management cluster's other machines (its system and infra machines, which run its logging, monitoring and cluster-management agents), and any control-plane room left unused because of the limit on clusters per management cluster.", "Quota is planned per management cluster, for all its machines at their largest, so a cluster's cores are an average share: a region whose management clusters are full needs a whole new one at once.", "The settings above are placeholders, to replace with production's own numbers from its deployment configuration.", "Not included: spare room for upgrades, a zone failure or new clusters; the cluster autoscaler of clusters that use autoscaling; the shared pods some control-plane machines run, such as the HyperShift operator's. The numbers assume machines are packed as tightly as the rules allow, which production's scheduler and placement may not manage for large and bigger clusters. Mixing sizes on a management cluster packs a little better than their shares add up to.", "These are estimates for planning, not an exact count."]}</script>
+<script id="page-data" type="application/json">{"sizes": [{"size": "small", "nodes_from": 0, "nodes_to": 60, "reserves": {"cpu_cores": 4.555, "memory_gib": 43.615}, "clusters_that_fit": [7, 14, 21, 28, 35, 42, 49, 56, 63, 70, 77, 84, 91, 98, 105, 112, 119, 126, 133, 140], "runs_out_of": ["network cards", "network cards", "network cards", "network cards", "network cards", "network cards", "network cards", "network cards", "network cards", "network cards", "network cards", "network cards", "network cards", "network cards", "network cards", "network cards", "network cards", "network cards", "network cards", "network cards"]}, {"size": "medium", "nodes_from": 61, "nodes_to": 120, "reserves": {"cpu_cores": 4.555, "memory_gib": 75.323}, "clusters_that_fit": [7, 14, 21, 28, 35, 42, 49, 56, 63, 70, 77, 84, 91, 98, 105, 112, 119, 126, 133, 140], "runs_out_of": ["network cards", "network cards", "network cards", "network cards", "network cards", "network cards", "network cards", "network cards", "network cards", "network cards", "network cards", "network cards", "network cards", "network cards", "network cards", "network cards", "network cards", "network cards", "network cards", "network cards"]}, {"size": "large", "nodes_from": 121, "nodes_to": 252, "reserves": {"cpu_cores": 4.555, "memory_gib": 133.323}, "clusters_that_fit": [5, 10, 16, 21, 27, 32, 37, 43, 48, 54, 59, 65, 70, 75, 81, 86, 92, 97, 102, 108], "runs_out_of": ["memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory"]}, {"size": "xlarge", "nodes_from": 253, "nodes_to": 360, "reserves": {"cpu_cores": 4.555, "memory_gib": 271.323}, "clusters_that_fit": [2, 5, 7, 10, 13, 15, 18, 21, 23, 26, 29, 31, 34, 37, 39, 42, 45, 47, 50, 53], "runs_out_of": ["memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory"]}, {"size": "xxlarge", "nodes_from": 361, "nodes_to": null, "reserves": {"cpu_cores": 4.555, "memory_gib": 388.323}, "clusters_that_fit": [1, 3, 5, 7, 9, 11, 13, 14, 16, 18, 20, 22, 24, 26, 27, 29, 31, 33, 35, 37], "runs_out_of": ["memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory", "memory"]}], "machine_cores": 32, "zones": 3, "network_cards_per_machine": 7.0, "defaults": {"machines_per_zone": 6, "other_cores": 104, "other_text": "1 system machine with 8 cores and 3 infra machines with 32 cores", "limit": 100, "placeholders": true}, "notes": ["What a cluster reserves: the CPU and memory set aside for every part of one hosted cluster's control plane, from the newest scale test that recorded them (OpenShift 4.22.8, 2026-08-14), with each size's memory from HyperShift's cluster sizing settings. A cluster's size goes by its total number of nodes.", "How many fit: the most clusters of each size that fit on a full management cluster, worked out exactly and checked part by part against production's rules. Copies of the same part of a cluster go in different availability zones (3 zones). Each 32-core machine has room for 28.532 cores, 240.819 GiB of memory, 7 network cards and 211 pods once its own system has taken its share, and every cluster needs a network card in each zone, for its router. “Limited by” in the table of cores per cluster shows what runs out first.", "Own cores: one cluster's share of the machines its control plane runs on, the control-plane machines: their cores divided by the clusters that fit.", "Amortized cores: one cluster's share of what's there for all the clusters: the management cluster's other machines (its system and infra machines, which run its logging, monitoring and cluster-management agents), and any room on the control-plane machines left unused because of the limit on clusters per management cluster.", "Quota is planned per management cluster, for all its machines at their largest, so the cores needed are the clusters' average share. A region whose management clusters have room for the clusters needs no new quota for them; a region whose management clusters are full needs whole new ones, as “Quota if the region is full” shows.", "The settings' defaults are placeholders, not production's: the size of the 49-node scale test's management cluster, which held 12 hosted clusters, so wasn't full. For real quota requests, use a copy of this page built with production's settings.", "Not included: spare room for upgrades, a zone failure or new clusters; the cluster autoscaler of clusters that use autoscaling; the shared pods some control-plane machines run, such as the HyperShift operator's. The numbers assume machines are packed as tightly as the rules allow, which production may not manage for large and bigger clusters. Mixing sizes on a management cluster packs a little better than their shares add up to.", "These are estimates for planning, not an exact count."]}</script>
 <script>
 "use strict";
 (function () {
@@ -157,7 +164,8 @@
   };
 
   function cores(n) { return ONE_DECIMAL.format(n); }
-  function toRequest(n) { return Math.ceil(n - 1e-6); }
+  // Rounds up, so 0 stays 0 rather than -0; the small allowance keeps float noise from adding a whole one.
+  function roundUp(n) { return Math.max(0, Math.ceil(n - 1e-6)); }
   function regionKey(text) { return text.toLowerCase().replace(/[\s_-]+/g, ""); }
 
   function cell(content, className) {
@@ -210,7 +218,8 @@
       own,
       amortized: total - own,
       total,
-      limitedBy: held < fit ? "the limit of " + WHOLE.format(settings.limit) + " clusters" : s.runs_out_of,
+      limitedBy: held < fit ? "the limit of " + WHOLE.format(settings.limit) + " clusters"
+                            : s.runs_out_of[settings.machinesPerZone - 1],
     };
   }
 
@@ -251,6 +260,7 @@
     const rows = [];
     let missingSize = 0;
     let badCount = 0;
+    let noRegion = 0;
     for (const tr of inputRows.rows) {
       const [customer, region, size, count] = tr.querySelectorAll("input, select");
       const n = Number(count.value);
@@ -261,9 +271,10 @@
         if (customer.value.trim() || region.value.trim()) missingSize++;
         continue;
       }
+      if (!region.value.trim()) noRegion++;
       rows.push({ customer: customer.value.trim(), region: region.value.trim(), size: BY_SIZE.get(size.value), count: n });
     }
-    return { rows, missingSize, badCount };
+    return { rows, missingSize, badCount, noRegion };
   }
 
   function group(rows, keyOf, labelsOf, settings) {
@@ -285,7 +296,6 @@
     return [...groups.values()].sort((a, b) => a.labels.join("\u0000").localeCompare(b.labels.join("\u0000")));
   }
 
-  function regionLabel(r) { return r.region || "(no region)"; }
   function customerLabel(r) { return r.customer || "(no customer)"; }
 
   function fill(tbody, rows, columns, emptyText) {
@@ -301,68 +311,97 @@
 
   function showSettings(settings) {
     const d = DATA.defaults;
-    document.getElementById("settings-summary").textContent = "Settings (placeholders): " +
+    // While the management cluster's machines are the build's placeholders, the numbers aren't production's.
+    const placeholders = d.placeholders && settings.machinesPerZone === d.machines_per_zone &&
+                         settings.otherCores === d.other_cores;
+    const changed = settings.machinesPerZone !== d.machines_per_zone || settings.otherCores !== d.other_cores ||
+                    settings.limit !== d.limit;
+    document.getElementById("placeholder-banner").hidden = !placeholders;
+    document.getElementById("settings-summary").textContent =
+      (placeholders ? "Settings (placeholders): " : changed ? "Settings (changed): " : "Settings: ") +
       settings.machinesPerZone + " control-plane machines per zone, " + WHOLE.format(settings.otherCores) +
       " cores of other machines, at most " + WHOLE.format(settings.limit) + " clusters per management cluster";
-    document.getElementById("machines-help").textContent = "1 to " + MOST_PER_ZONE + "; the default, " +
-      d.machines_per_zone + ", is what the 49-node test's management cluster had. The machines have " +
-      DATA.machine_cores + " cores each.";
+    document.getElementById("settings-intro").textContent = "For engineers: a full management cluster, with all its " +
+      "machines at their largest, as production plans quota for them. " + (d.placeholders
+        ? "The defaults for its machines are placeholders, not production's: what the 49-node scale test's " +
+          "management cluster had, which held 12 hosted clusters, so wasn't full."
+        : "The defaults are the settings this page was built with.");
+    document.getElementById("machines-help").textContent = "1 to " + MOST_PER_ZONE + ", each with " +
+      DATA.machine_cores + " cores. The default is " + d.machines_per_zone +
+      (d.placeholders ? ", a placeholder." : ".");
     document.getElementById("other-help").textContent = "Its system and infra machines, which run its logging, " +
-      "monitoring and cluster-management agents; quota is planned with every pool at its largest. The default, " +
-      WHOLE.format(d.other_cores) + ", is the 49-node test's " + d.other_text + ".";
-    document.getElementById("limit-help").textContent = "The default, " + WHOLE.format(d.limit) + ", is Clusters " +
-      "Service's limit; the Service Lifecycle team's capacity alert treats 60 as a management cluster's limit.";
+      "monitoring and cluster-management agents. The default, " + WHOLE.format(d.other_cores) + ", is " +
+      (d.placeholders ? "a placeholder: the 49-node test's " : "") + d.other_text + ".";
+    document.getElementById("limit-help").textContent = "Clusters Service's limit is 100 by default; the Service " +
+      "Lifecycle team's capacity alert treats 60 as a management cluster's limit. The default here is " +
+      WHOLE.format(d.limit) + ".";
   }
 
   function update() {
     const settings = readSettings();
     showSettings(settings);
-    const { rows, missingSize, badCount } = readRows();
+    const { rows, missingSize, badCount, noRegion } = readRows();
+    const controlPlaneCores = DATA.zones * settings.machinesPerZone * DATA.machine_cores;
+    const managementClusterCores = controlPlaneCores + settings.otherCores;
+    // A region with no room left needs its clusters' share in whole new management clusters.
+    const quotaIfFull = (share) => roundUp(share) * managementClusterCores;
+
+    // A region shows as first typed, in both tables, as "East US 2" and "eastus2" are one region.
+    const regionNames = new Map();
+    for (const r of rows) {
+      if (!regionNames.has(regionKey(r.region))) regionNames.set(regionKey(r.region), r.region || "(no region)");
+    }
+    const regionLabel = (r) => regionNames.get(regionKey(r.region));
 
     const regions = group(rows, (r) => regionKey(r.region), (r) => [regionLabel(r)], settings);
     fill(document.querySelector("#by-region tbody"), regions.map((g) => [
       cell(g.labels[0]), cell(WHOLE.format(g.clusters), "num"), cell(cores(g.own), "num"),
-      cell(cores(g.amortized), "num"), cell(cores(g.total), "num"), cell(WHOLE.format(toRequest(g.total)), "num"),
-      cell(TWO_DECIMALS.format(g.share), "num"),
-    ]), 7, "Add clusters above to see the totals.");
+      cell(cores(g.amortized), "num"), cell(cores(g.total), "num"), cell(WHOLE.format(roundUp(g.total)), "num"),
+      cell(TWO_DECIMALS.format(g.share), "num"), cell(WHOLE.format(quotaIfFull(g.share)), "num"),
+    ]), 8, "Add clusters above to see the totals.");
     const foot = document.querySelector("#by-region tfoot");
     foot.replaceChildren();
     if (regions.length) {
-      const sum = (key) => regions.reduce((total, g) => total + g[key], 0);
+      const sum = (valueOf) => regions.reduce((total, g) => total + valueOf(g), 0);
       foot.append(row([
-        cell("All regions"), cell(WHOLE.format(sum("clusters")), "num"), cell(cores(sum("own")), "num"),
-        cell(cores(sum("amortized")), "num"), cell(cores(sum("total")), "num"),
-        cell(WHOLE.format(regions.reduce((total, g) => total + toRequest(g.total), 0)), "num"),
-        cell(TWO_DECIMALS.format(sum("share")), "num"),
+        cell("All regions"), cell(WHOLE.format(sum((g) => g.clusters)), "num"), cell(cores(sum((g) => g.own)), "num"),
+        cell(cores(sum((g) => g.amortized)), "num"), cell(cores(sum((g) => g.total)), "num"),
+        cell(WHOLE.format(sum((g) => roundUp(g.total))), "num"), cell(TWO_DECIMALS.format(sum((g) => g.share)), "num"),
+        cell(WHOLE.format(sum((g) => quotaIfFull(g.share))), "num"),
       ]));
     }
 
-    const controlPlaneCores = DATA.zones * settings.machinesPerZone * DATA.machine_cores;
-    const managementClusterCores = controlPlaneCores + settings.otherCores;
-    document.getElementById("management-cluster").textContent = "Quota is planned per management cluster, for all " +
-      "its machines at their largest: " + WHOLE.format(managementClusterCores) + " cores each (" +
-      WHOLE.format(DATA.zones * settings.machinesPerZone) + " control-plane machines with " +
-      WHOLE.format(controlPlaneCores) + " cores, and " + WHOLE.format(settings.otherCores) + " cores of other " +
-      "machines). The cores above are the clusters' average share: when a region's management clusters are full, " +
-      "the next cluster needs a whole new management cluster, " + WHOLE.format(managementClusterCores) +
-      " cores, at once.";
+    document.getElementById("management-cluster").textContent = "With these settings, a full management cluster has " +
+      WHOLE.format(managementClusterCores) + " cores: " + WHOLE.format(DATA.zones * settings.machinesPerZone) +
+      " control-plane machines with " + WHOLE.format(controlPlaneCores) + " cores, and " +
+      WHOLE.format(settings.otherCores) + " cores of other machines. Quota comes in whole management clusters, " +
+      "planned with all their machines at their largest, so the cores needed are the clusters' average share. If a " +
+      "region's management clusters have room for these clusters, it needs no new quota for them; if they're full, " +
+      "it needs the whole new management clusters in \u201cQuota if the region is full\u201d, " +
+      WHOLE.format(managementClusterCores) + " cores each.";
 
     const pairs = group(rows, (r) => r.customer.toLowerCase() + "\u0000" + regionKey(r.region),
                         (r) => [customerLabel(r), regionLabel(r)], settings);
     fill(document.querySelector("#by-customer tbody"), pairs.map((g) => [
       cell(g.labels[0]), cell(g.labels[1]), cell(WHOLE.format(g.clusters), "num"), cell(cores(g.own), "num"),
-      cell(cores(g.amortized), "num"), cell(cores(g.total), "num"), cell(WHOLE.format(toRequest(g.total)), "num"),
+      cell(cores(g.amortized), "num"), cell(cores(g.total), "num"), cell(WHOLE.format(roundUp(g.total)), "num"),
     ]), 7, "Add clusters above to see the totals.");
 
-    document.getElementById("sizes-intro").textContent = "What one hosted cluster of each size takes on a full " +
-      "management cluster with these settings. A size covers its number of nodes, infra nodes as well as workers.";
+    const cards = DATA.network_cards_per_machine;
+    document.getElementById("sizes-intro").textContent = "What one hosted cluster of each size reserves, and what " +
+      "it takes on a full management cluster with these settings. A cluster's size goes by its total number of " +
+      "nodes. Clusters take more cores than they reserve, as machines run out of network cards or memory first: " +
+      "each machine has " + WHOLE.format(cards) + " network cards for clusters, and every cluster needs one in each " +
+      "zone, so a management cluster with " + settings.machinesPerZone + " machines per zone holds at most " +
+      WHOLE.format(cards * settings.machinesPerZone) + " clusters, however few cores they reserve.";
     fill(document.querySelector("#sizes tbody"), SIZES.map((s) => {
       const one = perCluster(s, settings);
       return [
-        cell(sizeLabel(s)), cell(WHOLE.format(one.held), "num"), cell(one.limitedBy), cell(cores(one.own), "num"),
+        cell(sizeLabel(s)), cell(cores(s.reserves.cpu_cores), "num"), cell(cores(s.reserves.memory_gib), "num"),
+        cell(WHOLE.format(one.held), "num"), cell(one.limitedBy), cell(cores(one.own), "num"),
         cell(cores(one.amortized), "num"), cell(cores(one.total), "num"),
       ];
-    }), 6, "No sizes.");
+    }), 8, "No sizes.");
 
     const notices = document.getElementById("notices");
     notices.replaceChildren();
@@ -376,6 +415,8 @@
                          " counted: \u201cHow many\u201d must be a whole number of 0 or more.");
     if (missingSize) notice(missingSize + (missingSize === 1 ? " row isn't" : " rows aren't") +
                             " counted yet: choose a cluster size.");
+    if (noRegion) notice(noRegion + (noRegion === 1 ? " row has no region, so it's" : " rows have no region, so " +
+                         "they're") + " counted under \u201c(no region)\u201d.");
     if (Object.values(controls).some((c) => c.getAttribute("aria-invalid") === "true")) {
       notice("A setting isn't valid, so its default is used: see the settings above.");
     }

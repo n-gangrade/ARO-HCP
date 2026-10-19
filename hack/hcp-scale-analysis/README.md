@@ -17,7 +17,7 @@ hosted-cluster size, plus a note on how much to trust each size.
 | `pack_clusters.py` | Works out how many control-plane machines, and so cores of quota, a mix of hosted clusters needs, by packing their pods from `size-pods.json` |
 | `check_packing.py` | Checks that `pack_clusters.py`'s packings follow the rules, and compares them with the fewest machines possible |
 | `cores_per_cluster.py` | Works out the cores one cluster of each size takes on a full management cluster, into `cores-per-cluster.json`: the numbers for the PM page |
-| `build_pm_page.py` | Builds the PM page, `pm-page.html`, from `pm-page-template.html` and `cores-per-cluster.json` |
+| `build_pm_page.py` | Builds the PM page, `pm-page.html`, from `pm-page-template.html`, `cores-per-cluster.json` and `size-pods.json` |
 | `pm-page-template.html` | The PM page's layout and code, without the numbers |
 | `run-notes.json` | Hand-written trust note for each run (`good`, `caveats` or `low`, and why) |
 | `container-usage.json` | Generated: per-container usage of every run and what Kubernetes reserved, with the run's trust note. The input for comparing sizes and for `component_requests.py` and `simulator_profiles.py` |
@@ -25,7 +25,7 @@ hosted-cluster size, plus a note on how much to trust each size.
 | `size-pods.json` | Generated: the pods one cluster of each t-shirt size runs, with what each copy reserves today and what it uses, for simulating how clusters pack onto machines |
 | `size-cores.json` | Generated: one cluster's own, shared and total cores for each size, by the scheduling simulator |
 | `cores-per-cluster.json` | Generated: how many clusters of each size fit on a management cluster, and the cores one cluster takes on a full one. The input for the PM page |
-| `pm-page.html` | Generated: the PM page, a single self-contained file that works out the cores to request per region and customer |
+| `pm-page.html` | Generated: the PM page, a single self-contained file that works out the cores needed per region and customer, and the quota a region needs if its management clusters are full |
 | `graphs/` | Generated: CPU and memory graphs and a `summary.json` for every run |
 
 The older scripts here (`extract_all.py`, `extract_kas.py`, `plot_kas.py`, `plot_kas_sum.py`, `report_replicas.py`,
@@ -335,9 +335,12 @@ For each size it works out:
     runs besides its control-plane machines, its system and infra machines, which run its logging, monitoring and
     cluster-management agents, and any control-plane room the limit leaves unused;
   - `cores`: the two added up, a full management cluster's cores over the clusters it holds.
+- **What runs out first** (`runs_out_of`) on a full management cluster, and for 1 to 20 control-plane machines per
+  zone (`runs_out_of_by_machines`), and what stops more clusters going on (`limited_by`): that, or the limit.
 
 The management cluster's settings are all placeholders to confirm, as production's real numbers are in its private
-deployment config:
+deployment config. `settings.placeholders` in `cores-per-cluster.json` says whether `--full` and `--other` are still
+these placeholders:
 
 - **Control-plane machines per zone on a full management cluster** (`--full`): 6, what the 49-node run's management
   cluster had with its 12 hosted clusters; a full one can have more.
@@ -436,22 +439,34 @@ These depend on assumptions, recorded in the file's `settings`:
 server, network connection or other files. Add a row for each customer, region, cluster size and number of clusters,
 and it shows, using `cores-per-cluster.json`'s numbers:
 
-- **Cores to request per region:** the clusters' own cores, their amortized cores and the total, rounded up to whole
-  cores, and how many full management clusters' worth they take.
-- **Per customer and region:** the same, split by customer.
-- **Cores per cluster:** what one cluster of each size takes on a full management cluster, and what limits how many
-  fit.
+- **Cores needed per region:** the clusters' own cores, their amortized cores and the total, rounded up to whole cores
+  (each row on its own, so rows can add up to a little more than a total); their share of a full management cluster;
+  and the quota the region needs if its management clusters are full. Quota comes in whole management clusters, so
+  that's the share rounded up to whole management clusters, times a full one's cores; a region whose management
+  clusters have room for the clusters needs no new quota for them.
+- **Per customer and region:** the cores needed, split by customer.
+- **Cores per cluster:** what one cluster of each size reserves (from `size-pods.json`), what it takes on a full
+  management cluster, and what limits how many fit, so it shows why a cluster takes more cores than it reserves.
 - **How the numbers are worked out:** the assumptions behind them.
 
 Its settings are the management cluster's (see "Cores per cluster on a full management cluster"): control-plane
 machines per zone, the cores of its other machines and the most hosted clusters on one. They start at
-`cores-per-cluster.json`'s placeholders, and can be changed on the page. As the page can't run the solver, its
-control-plane machines are always the 32-core machines the numbers were worked out for, with 1 to 20 per zone.
-Regions are free text, used to group the rows; "East US 2" and "eastus2" count as the same region.
+`cores-per-cluster.json`'s, and can be changed on the page. While its management cluster's machines are
+`cores_per_cluster.py`'s placeholders (`settings.placeholders`) and unchanged on the page, a banner at the top says
+the numbers aren't production's. As the page can't run the solver, its control-plane machines are always the 32-core
+machines the numbers were worked out for, with 1 to 20 per zone. Regions are free text, used to group the rows:
+"East US 2" and "eastus2" count as the same region, shown as first typed, and rows with no region are counted under
+"(no region)", with a notice.
 
 To change the layout, edit `pm-page-template.html` and rebuild; `build_pm_page.py` fills in the numbers where it says
-`__PAGE_DATA__`. To give it production's settings without committing them, rebuild `cores-per-cluster.json` and the
-page with your own `--full`, `--other` and `--limit`, and keep that page to yourself.
+`__PAGE_DATA__`, and stops if its inputs don't hold what the page says about them. For real quota requests, build a
+copy with production's settings, outside the repo, as they're private:
+
+    $PY cores_per_cluster.py --full N --other system=MACHINESxCORES infra=MACHINESxCORES --limit N \
+        --output /tmp/cores-per-cluster-prod.json
+    $PY build_pm_page.py --cores /tmp/cores-per-cluster-prod.json --output ~/pm-page-prod.html
+
+Share that copy privately, and don't commit it or its JSON.
 
 ## Known limitations
 

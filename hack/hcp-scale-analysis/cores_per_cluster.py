@@ -21,8 +21,9 @@ share of a full management cluster's machines. For each size, this works out:
   control-plane room the limit leaves unused (shared_cores), and the two added up (cores).
 
 The settings, the management cluster's machines, are placeholders to confirm (see FULL_PER_ZONE and the settings
-after it); --full, --other and --limit change them. Quota is planned per management cluster, for all its machines at
-their largest, so a region that needs another management cluster needs all of its cores at once
+after it); --full, --other and --limit change them, and settings.placeholders in the output says whether the
+management cluster's machines are still the placeholders. Quota is planned per management cluster, for all its
+machines at their largest, so a region that needs another management cluster needs all of its cores at once
 (new_management_cluster_cores). It writes cores-per-cluster.json next to this script, or cores-per-cluster-used.json
 with --basis used, which packs what the pods use instead of what they reserve.
 
@@ -67,6 +68,9 @@ FIELDS = {
     "basis": "reserved: packs what the pods reserve today; used: what they use",
     "full_machines_per_zone": "control-plane machines in each zone of a full management cluster",
     "other_machines": "the machines a management cluster runs besides its control-plane machines",
+    "placeholders": "true if full_machines_per_zone and other_machines are this script's placeholders, what the "
+                    "49-node run's management cluster had (it wasn't full), rather than numbers given with --full "
+                    "and --other",
     "limit": "the most hosted clusters on one management cluster",
     "new_management_cluster_cores": "the cores of a full management cluster, control-plane and other machines: quota "
                                     "is planned per management cluster, for all its machines at their largest, so a "
@@ -77,6 +81,7 @@ FIELDS = {
                   "most the machines' room allows in total",
     "clusters": "how many clusters of the size a full management cluster holds: those that fit, at most the limit",
     "runs_out_of": "the resource clusters of the size run out of first on a full management cluster",
+    "runs_out_of_by_machines": "runs_out_of for 1, 2, ... control-plane machines per zone, like clusters_that_fit",
     "limited_by": "what stops more clusters of the size going on a full management cluster: runs_out_of, or the "
                   "limit",
     "own_cores": "one cluster's own share of a full management cluster's control-plane machines: their cores over "
@@ -313,14 +318,17 @@ def main():
             "shared_cores": round((full_cores + other_cores) / clusters - full_cores / fit, DECIMALS),
             "cores": round((full_cores + other_cores) / clusters, DECIMALS),
             "clusters_that_fit": [found[per_zone][0]["clusters"] for per_zone in range(1, args.most + 1)],
+            "runs_out_of_by_machines": [fullest(comps, found[per_zone][0], per_zone)
+                                        for per_zone in range(1, args.most + 1)],
             "not_proven": {str(per_zone): allows for per_zone, (_, allows, proven) in found.items() if not proven},
         })
     if broken:
         sys.exit(f"{broken} packings broke a rule, so nothing was written")
+    placeholders = args.full == FULL_PER_ZONE and args.other == OTHER_MACHINES
     output = {
         "description": "The cores one hosted cluster of each t-shirt size takes on a full management cluster, written "
-                       "by hack/hcp-scale-analysis/cores_per_cluster.py from size-pods.json. The settings are "
-                       "placeholders to confirm.",
+                       "by hack/hcp-scale-analysis/cores_per_cluster.py from size-pods.json."
+                       + (" The settings are placeholders to confirm." if placeholders else ""),
         "basis": args.basis,
         "settings": {
             "machine_cores": pc.MACHINE_CORES,
@@ -328,6 +336,7 @@ def main():
             "full_machines_per_zone": args.full,
             "other_machines": [{"pool": pool, "machines": machines, "cores": cores}
                                for pool, machines, cores in args.other],
+            "placeholders": placeholders,
             "limit": args.limit,
             "room_per_machine": pc.ROOM,
         },

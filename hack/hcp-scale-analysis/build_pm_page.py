@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """Build the PM page: one self-contained HTML file that works out the cores customers' hosted clusters need.
 
-Reads cores-per-cluster.json (from cores_per_cluster.py) and size-pods.json (for the test run its reservations come
-from), puts them into pm-page-template.html and writes pm-page.html, all next to this script by default. The page
-needs no server or network connection: open it in a browser, or send the file to someone. Rerun this whenever those
-files change.
+Reads cores-per-cluster.json (from cores_per_cluster.py) and size-pods.json (what one cluster of each size reserves,
+and the test run that comes from), puts them into pm-page-template.html and writes pm-page.html, all next to this
+script by default. The page needs no server or network connection: open it in a browser, or send the file to
+someone. Rerun this whenever those files change.
 
-On the page, PMs add a row for each customer, region, cluster size and number of clusters, and get the cores to
-request per region and per customer: each cluster's own share of a full management cluster's control-plane machines
-and its amortized share of what's there for all the clusters. The management cluster's settings are on the page, with
-cores-per-cluster.json's as defaults.
+On the page, PMs add a row for each customer, region, cluster size and number of clusters, and get the cores needed
+per region and per customer: each cluster's own share of a full management cluster's control-plane machines and its
+amortized share of what's there for all the clusters. As quota comes in whole management clusters, it also gives the
+quota a region needs if its management clusters are full. The management cluster's settings are on the page, with
+cores-per-cluster.json's as defaults. If those are cores_per_cluster.py's placeholders, the page says so at the top;
+for real quota requests, build a copy from a cores-per-cluster.json made with production's --full, --other and
+--limit, and keep that copy out of this public repo.
 
 Usage:
   python3 build_pm_page.py [--cores FILE] [--output FILE]
@@ -25,8 +28,7 @@ DEFAULT_OUTPUT = os.path.join(HERE, "pm-page.html")
 TEMPLATE = os.path.join(HERE, "pm-page-template.html")
 SIZE_PODS = os.path.join(HERE, "size-pods.json")
 PLACEHOLDER = "__PAGE_DATA__"
-RESOURCE_NAMES = {"cpu_cores": "CPU", "memory_gib": "memory", "swift_nics": "network cards (SWIFT NICs)",
-                  "pods": "pod slots"}
+RESOURCE_NAMES = {"cpu_cores": "CPU", "memory_gib": "memory", "swift_nics": "network cards", "pods": "pod slots"}
 
 
 def parse_args():
@@ -60,75 +62,104 @@ def notes(cores, reserved_from):
     settings = cores["settings"]
     room = settings["room_per_machine"]
     run = reserved_from or {}
-    source = (f"the newest scale test that recorded them ({run['run']}: OpenShift {run['ocp_version']}, {run['date']})"
-              if run.get("run") else "the newest scale test that recorded them")
+    source = (f"the newest scale test that recorded them (OpenShift {run['ocp_version']}, {run['date']})"
+              if run.get("ocp_version") and run.get("date") else "the newest scale test that recorded them")
+    if settings.get("placeholders", True):
+        defaults = ("The settings' defaults are placeholders, not production's: the size of the 49-node scale test's "
+                    "management cluster, which held 12 hosted clusters, so wasn't full. For real quota requests, use a "
+                    "copy of this page built with production's settings.")
+    else:
+        defaults = "The settings' defaults are the ones this page was built with."
     return [
-        f"What a cluster needs: the pods one hosted cluster of each size runs and what each one reserves (its "
-        f"resource requests), from {source}, with each size's memory settings from HyperShift's cluster sizing "
-        f"configuration. A size covers its number of nodes, infra nodes as well as workers.",
-        f"How many fit: the most clusters of each size that fit on a full management cluster, worked out by an exact "
-        f"solver and checked pod by pod, by production's rules. Each copy of a component with more than one copy runs "
-        f"in a different availability zone ({settings['zones']} zones), and each {settings['machine_cores']}-core "
-        f"control-plane machine has room for {room['cpu_cores']:g} cores, {room['memory_gib']:g} GiB of memory, "
-        f"{room['swift_nics']:g} network cards (SWIFT NICs: each router copy takes one) and {room['pods']:g} pods, "
-        f"after what it keeps for its system and the helper pods every machine runs. Small and medium clusters run "
-        f"out of network cards first; large and bigger ones run out of memory.",
-        "Own cores: one cluster's share of a full management cluster's control-plane machines, the machines its own "
-        "control plane runs on: their cores divided by the clusters that fit.",
+        f"What a cluster reserves: the CPU and memory set aside for every part of one hosted cluster's control plane, "
+        f"from {source}, with each size's memory from HyperShift's cluster sizing settings. A cluster's size goes by "
+        f"its total number of nodes.",
+        f"How many fit: the most clusters of each size that fit on a full management cluster, worked out exactly and "
+        f"checked part by part against production's rules. Copies of the same part of a cluster go in different "
+        f"availability zones ({settings['zones']} zones). Each {settings['machine_cores']}-core machine has room for "
+        f"{room['cpu_cores']:g} cores, {room['memory_gib']:g} GiB of memory, {room['swift_nics']:g} network cards and "
+        f"{room['pods']:g} pods once its own system has taken its share, and every cluster needs a network card in "
+        f"each zone, for its router. \u201cLimited by\u201d in the table of cores per cluster shows what runs out "
+        f"first.",
+        "Own cores: one cluster's share of the machines its control plane runs on, the control-plane machines: their "
+        "cores divided by the clusters that fit.",
         "Amortized cores: one cluster's share of what's there for all the clusters: the management cluster's other "
         "machines (its system and infra machines, which run its logging, monitoring and cluster-management agents), "
-        "and any control-plane room left unused because of the limit on clusters per management cluster.",
-        "Quota is planned per management cluster, for all its machines at their largest, so a cluster's cores are an "
-        "average share: a region whose management clusters are full needs a whole new one at once.",
-        "The settings above are placeholders, to replace with production's own numbers from its deployment "
-        "configuration.",
+        "and any room on the control-plane machines left unused because of the limit on clusters per management "
+        "cluster.",
+        "Quota is planned per management cluster, for all its machines at their largest, so the cores needed are the "
+        "clusters' average share. A region whose management clusters have room for the clusters needs no new quota for "
+        "them; a region whose management clusters are full needs whole new ones, as \u201cQuota if the region is "
+        "full\u201d shows.",
+        defaults,
         "Not included: spare room for upgrades, a zone failure or new clusters; the cluster autoscaler of clusters "
         "that use autoscaling; the shared pods some control-plane machines run, such as the HyperShift operator's. "
-        "The numbers assume machines are packed as tightly as the rules allow, which production's scheduler and "
-        "placement may not manage for large and bigger clusters. Mixing sizes on a management cluster packs a little "
-        "better than their shares add up to.",
+        "The numbers assume machines are packed as tightly as the rules allow, which production may not manage for "
+        "large and bigger clusters. Mixing sizes on a management cluster packs a little better than their shares add "
+        "up to.",
         "These are estimates for planning, not an exact count.",
     ]
 
 
-def page_data(cores, reserved_from):
+def page_data(cores, size_pods):
     settings = cores["settings"]
+    reserved = {size["size"]: size["reserved"]["totals"] for size in size_pods["sizes"]}
     return {
         "sizes": [{
             "size": size["size"],
             "nodes_from": size["nodes_from"],
             "nodes_to": size["nodes_to"],
+            "reserves": {resource: reserved[size["size"]][resource] for resource in ("cpu_cores", "memory_gib")},
             "clusters_that_fit": size["clusters_that_fit"],
-            "runs_out_of": RESOURCE_NAMES.get(size["runs_out_of"], size["runs_out_of"]),
+            "runs_out_of": [RESOURCE_NAMES.get(resource, resource) for resource in size["runs_out_of_by_machines"]],
         } for size in cores["sizes"]],
         "machine_cores": settings["machine_cores"],
         "zones": settings["zones"],
+        "network_cards_per_machine": settings["room_per_machine"]["swift_nics"],
         "defaults": {
             "machines_per_zone": settings["full_machines_per_zone"],
             "other_cores": sum(pool["machines"] * pool["cores"] for pool in settings["other_machines"]),
             "other_text": others_text(settings["other_machines"]),
             "limit": settings["limit"],
+            "placeholders": settings.get("placeholders", True),
         },
-        "notes": notes(cores, reserved_from),
+        "notes": notes(cores, size_pods.get("reserved_from")),
     }
+
+
+def check_inputs(cores, cores_path, size_pods):
+    """Stops if the inputs don't hold what the page needs, or what its text says about them."""
+    if not cores.get("sizes"):
+        sys.exit(f"{cores_path} has no sizes")
+    reserved = {size["size"]: size.get("reserved", {}).get("totals") for size in size_pods.get("sizes", [])}
+    zones = cores["settings"]["zones"]
+    for size in cores["sizes"]:
+        if len(size.get("runs_out_of_by_machines", [])) != len(size["clusters_that_fit"]):
+            sys.exit(f"{cores_path} has no runs_out_of_by_machines for {size['size']}: rerun cores_per_cluster.py")
+        totals = reserved.get(size["size"])
+        if not totals:
+            sys.exit(f"{SIZE_PODS} has no reservations for {size['size']}")
+        # The page says every cluster needs a network card in each zone.
+        if totals["swift_nics"] != zones:
+            sys.exit(f"{size['size']} reserves {totals['swift_nics']} network cards, not one per zone ({zones}): "
+                     f"update the page's text")
 
 
 def main():
     args = parse_args()
     cores_path = os.path.expanduser(args.cores)
     cores = read_json(cores_path)
-    if not cores.get("sizes"):
-        sys.exit(f"{cores_path} has no sizes")
+    size_pods = read_json(SIZE_PODS)
+    check_inputs(cores, cores_path, size_pods)
     if cores.get("basis") != "reserved":
         print(f"warning: {cores_path} packs what the pods {cores.get('basis')}, not what they reserve",
               file=sys.stderr)
-    reserved_from = read_json(SIZE_PODS).get("reserved_from") if os.path.exists(SIZE_PODS) else None
     with open(TEMPLATE) as f:
         template = f.read()
     if template.count(PLACEHOLDER) != 1:
         sys.exit(f"{TEMPLATE} must contain {PLACEHOLDER} exactly once")
     # Escaping "<" keeps the data from ever closing its <script> element early.
-    data = json.dumps(page_data(cores, reserved_from), ensure_ascii=False).replace("<", "\\u003c")
+    data = json.dumps(page_data(cores, size_pods), ensure_ascii=False).replace("<", "\\u003c")
     target = os.path.expanduser(args.output)
     with open(target, "w") as f:
         f.write(template.replace(PLACEHOLDER, data))
