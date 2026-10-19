@@ -15,11 +15,12 @@ for real quota requests, build a copy from a cores-per-cluster.json made with pr
 --limit, and keep that copy out of this public repo.
 
 Usage:
-  python3 build_pm_page.py [--cores FILE] [--output FILE] [--settings-from TEXT]
+  python3 build_pm_page.py [--cores FILE] [--output FILE] [--settings-from TEXT] [--vm-families FILE]
 """
 import argparse
 import json
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -43,6 +44,10 @@ def parse_args():
                         help="where the management cluster's settings come from, shown at the top of the page, such "
                              "as \"production's deployment configuration\"; not for cores_per_cluster.py's "
                              "placeholders, which the page warns about instead")
+    parser.add_argument("--vm-families", metavar="FILE",
+                        help="each region's VM family for each pool of machines, as JSON (see the README's \"PM "
+                             "page\"), to show the quota per VM family; production's are private, so keep the file "
+                             "and the page out of this repo")
     return parser.parse_args()
 
 
@@ -95,8 +100,13 @@ def notes(cores, reserved_from, settings_from):
         "cluster.",
         "Quota is planned per management cluster, for all its machines at their largest, so the cores needed are the "
         "clusters' average share. A region whose management clusters have room for the clusters needs no new quota for "
-        "them; a region whose management clusters are full needs whole new ones, as \u201cQuota if the region is "
-        "full\u201d shows.",
+        "them; a region whose management clusters have no room needs whole new ones, as \u201cIf the region has no "
+        "room\u201d shows.",
+        f"Clusters per management cluster: \u201cCores needed\u201d plans for at most {settings['limit']} on each, the "
+        f"settings' default. The Service Lifecycle team's capacity alert counts a management cluster as full at 60 "
+        f"clusters, and asks for another management cluster above 51. \u201cBest case\u201d fills management clusters "
+        f"until they run out of room, up to the {settings['clusters_service_limit']} clusters Clusters Service puts on "
+        f"one: it keeps nothing spare for upgrades, a zone failure or the time a new management cluster takes to add.",
         defaults,
         "Not included: spare room for upgrades, a zone failure or new clusters; the cluster autoscaler of clusters "
         "that use autoscaling; the shared pods some control-plane machines run, such as the HyperShift operator's. "
@@ -107,7 +117,28 @@ def notes(cores, reserved_from, settings_from):
     ]
 
 
-def page_data(cores, size_pods, settings_from):
+def region_key(text):
+    """The page's key for a region, so "East US 2" and "eastus2" match: like regionKey in the template."""
+    return re.sub(r"[\s_-]+", "", text.lower())
+
+
+def vm_families(path, cores):
+    """The page's VM families from --vm-families: {"source", "note", "regions": {key: {"name", "pools"}}}."""
+    data = read_json(path)
+    pools = ["control_plane"] + [pool["pool"] for pool in cores["settings"]["other_machines"]]
+    regions = data.get("regions")
+    if not isinstance(regions, dict) or not regions:
+        sys.exit(f"{path} has no regions")
+    out = {}
+    for name, families in regions.items():
+        missing = [pool for pool in pools if not isinstance(families.get(pool), str) or not families[pool]]
+        if missing:
+            sys.exit(f"{path}: {name} has no VM family for {', '.join(missing)}")
+        out[region_key(name)] = {"name": name, "pools": {pool: families[pool] for pool in pools}}
+    return {"source": data.get("source"), "note": data.get("note"), "regions": out}
+
+
+def page_data(cores, size_pods, settings_from, families):
     settings = cores["settings"]
     reserved = {size["size"]: size["reserved"]["totals"] for size in size_pods["sizes"]}
     return {
@@ -121,7 +152,11 @@ def page_data(cores, size_pods, settings_from):
         } for size in cores["sizes"]],
         "machine_cores": settings["machine_cores"],
         "zones": settings["zones"],
+        "clusters_service_limit": settings["clusters_service_limit"],
         "network_cards_per_machine": settings["room_per_machine"]["swift_nics"],
+        "other_pools": [{"pool": pool["pool"], "cores": pool["machines"] * pool["cores"]}
+                        for pool in settings["other_machines"]],
+        "vm_families": families,
         "defaults": {
             "machines_per_zone": settings["full_machines_per_zone"],
             "other_cores": sum(pool["machines"] * pool["cores"] for pool in settings["other_machines"]),
@@ -138,6 +173,8 @@ def check_inputs(cores, cores_path, size_pods):
     """Stops if the inputs don't hold what the page needs, or what its text says about them."""
     if not cores.get("sizes"):
         sys.exit(f"{cores_path} has no sizes")
+    if "clusters_service_limit" not in cores["settings"]:
+        sys.exit(f"{cores_path} has no clusters_service_limit: rerun cores_per_cluster.py")
     reserved = {size["size"]: size.get("reserved", {}).get("totals") for size in size_pods.get("sizes", [])}
     zones = cores["settings"]["zones"]
     for size in cores["sizes"]:
@@ -164,12 +201,14 @@ def main():
     if cores.get("basis") != "reserved":
         print(f"warning: {cores_path} packs what the pods {cores.get('basis')}, not what they reserve",
               file=sys.stderr)
+    families = vm_families(os.path.expanduser(args.vm_families), cores) if args.vm_families else None
     with open(TEMPLATE) as f:
         template = f.read()
     if template.count(PLACEHOLDER) != 1:
         sys.exit(f"{TEMPLATE} must contain {PLACEHOLDER} exactly once")
     # Escaping "<" keeps the data from ever closing its <script> element early.
-    data = json.dumps(page_data(cores, size_pods, args.settings_from), ensure_ascii=False).replace("<", "\\u003c")
+    data = json.dumps(page_data(cores, size_pods, args.settings_from, families),
+                      ensure_ascii=False).replace("<", "\\u003c")
     target = os.path.expanduser(args.output)
     with open(target, "w") as f:
         f.write(template.replace(PLACEHOLDER, data))

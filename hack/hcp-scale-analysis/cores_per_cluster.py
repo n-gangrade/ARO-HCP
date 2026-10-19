@@ -56,10 +56,14 @@ FULL_PER_ZONE = 6
 # 49-node run, 1 system machine with 8 cores and 3 infra machines with 32 (to confirm; quota is planned for every
 # pool at its largest).
 OTHER_MACHINES = [("system", 1, 8), ("infra", 3, 32)]
-# The most hosted clusters on one management cluster: Clusters Service's limit (clustersService.
-# provisionShardClusterLimit in config/config.yaml). The Service Lifecycle team's capacity alert treats 60 as a
-# management cluster's limit (observability/alerts/mgmt-capacity-prometheusRule.yaml).
-LIMIT = 100
+# The most hosted clusters to plan for on one management cluster: 60, where the Service Lifecycle team's capacity
+# alert counts a management cluster as full (observability/alerts/mgmt-capacity-prometheusRule.yaml, which asks for
+# another management cluster above 51), to confirm with them. Clusters Service's own limit is higher, but highly
+# available clusters run out of SWIFT NICs before it, and filling management clusters that far keeps nothing spare.
+LIMIT = 60
+# The most hosted clusters Clusters Service puts on one management cluster (clustersService.
+# provisionShardClusterLimit in config/config.yaml): the PM page's best case fills management clusters up to it.
+CLUSTERS_SERVICE_LIMIT = 100
 MOST_PER_ZONE = 20  # clusters_that_fit goes up to this many control-plane machines per zone
 SECONDS = 60        # the solver's limit for each number of machines
 DECIMALS = 3
@@ -71,7 +75,8 @@ FIELDS = {
     "placeholders": "true if full_machines_per_zone and other_machines are this script's placeholders, what the "
                     "49-node run's management cluster had (it wasn't full), rather than numbers given with --full "
                     "and --other",
-    "limit": "the most hosted clusters on one management cluster",
+    "limit": "the most hosted clusters to plan for on one management cluster",
+    "clusters_service_limit": "the most hosted clusters Clusters Service puts on one management cluster",
     "new_management_cluster_cores": "the cores of a full management cluster, control-plane and other machines: quota "
                                     "is planned per management cluster, for all its machines at their largest, so a "
                                     "region that needs another one needs all of these at once",
@@ -104,7 +109,8 @@ def parse_args():
                         help="the machines a management cluster runs besides its control-plane machines (default: "
                              + " ".join(f"{pool}={machines}x{cores}" for pool, machines, cores in OTHER_MACHINES) + ")")
     parser.add_argument("--limit", type=int, default=LIMIT, metavar="N",
-                        help=f"the most hosted clusters on one management cluster (default: {LIMIT})")
+                        help=f"the most hosted clusters to plan for on one management cluster, at most Clusters "
+                             f"Service's {CLUSTERS_SERVICE_LIMIT} (default: {LIMIT})")
     parser.add_argument("--most", type=int, default=MOST_PER_ZONE, metavar="N",
                         help=f"work out clusters_that_fit up to this many machines per zone (default: {MOST_PER_ZONE})")
     parser.add_argument("--seconds", type=float, default=SECONDS, metavar="S",
@@ -117,8 +123,8 @@ def parse_args():
     args = parser.parse_args()
     if not 1 <= args.full <= args.most:
         parser.error(f"--full must be between 1 and --most ({args.most})")
-    if args.limit < 1:
-        parser.error("--limit must be 1 or more")
+    if not 1 <= args.limit <= CLUSTERS_SERVICE_LIMIT:
+        parser.error(f"--limit must be between 1 and Clusters Service's limit ({CLUSTERS_SERVICE_LIMIT})")
     return args
 
 
@@ -338,6 +344,7 @@ def main():
                                for pool, machines, cores in args.other],
             "placeholders": placeholders,
             "limit": args.limit,
+            "clusters_service_limit": CLUSTERS_SERVICE_LIMIT,
             "room_per_machine": pc.ROOM,
         },
         "new_management_cluster_cores": full_cores + other_cores,

@@ -346,9 +346,15 @@ these placeholders:
   cluster had with its 12 hosted clusters; a full one can have more.
 - **Its other machines** (`--other`): 1 system machine with 8 cores and 3 infra machines with 32, what the 49-node
   run's management cluster had. Quota is planned with every pool at its largest, so count them at their largest.
-- **The most hosted clusters per management cluster** (`--limit`): 100, Clusters Service's limit
-  (`clustersService.provisionShardClusterLimit` in `config/config.yaml`). The Service Lifecycle team's capacity alert
-  (`observability/alerts/mgmt-capacity-prometheusRule.yaml`) treats 60 as a management cluster's limit.
+- **The most hosted clusters to plan for per management cluster** (`--limit`): 60, where the Service Lifecycle team's
+  capacity alert (`observability/alerts/mgmt-capacity-prometheusRule.yaml`) counts a management cluster as full; above
+  51 it asks for another management cluster. It's to confirm with them: the alert has kept the `info` severity it was
+  given for testing since December 2025, its commits give no reason for 60, and it predates placement by SWIFT NICs.
+  Clusters Service puts at most 100 on one (`clustersService.provisionShardClusterLimit` in `config/config.yaml`,
+  `clusters_service_limit`), the most `--limit` can be, but highly available clusters, which need a SWIFT NIC in each
+  zone, run out of them first. Filling management clusters until they run out of room keeps nothing spare for
+  upgrades, a zone failure or the time a new management cluster takes to add, and as the placement controller only
+  counts SWIFT NICs, it could put more large and bigger clusters on a management cluster than its memory holds.
 
 With these settings:
 
@@ -440,13 +446,18 @@ server, network connection or other files. Add a row for each customer, region, 
 and it shows, using `cores-per-cluster.json`'s numbers:
 
 - **Cores needed per region:** the clusters' own cores, their amortized cores and the total, rounded up to whole cores
-  (each row on its own, so rows can add up to a little more than a total); their share of a full management cluster;
-  and the quota the region needs if its management clusters are full. Quota comes in whole management clusters, so
-  that's the share rounded up to whole management clusters, times a full one's cores; a region whose management
-  clusters have room for the clusters needs no new quota for them.
-- **Per customer and region:** the cores needed, split by customer.
+  (each row on its own, so rows can add up to a little more than a total), an average share of the management
+  clusters; the best case, the same if management clusters are filled until they run out of room, up to Clusters
+  Service's limit, keeping nothing spare; their share of a full management cluster; and, if the region has no room,
+  how many whole management clusters it needs, times their cores: quota comes in whole management clusters, so that's
+  the share rounded up. A region whose management clusters have room for the clusters needs no new quota for them.
+- **Quota by VM family,** only in a copy built with `--vm-families`: the same per region, split by the VM family of the
+  machines the cores are on, as Azure grants quota per region and VM family. A family's cores are the region's share
+  of a management cluster times that family's cores on one.
+- **Per customer and region:** the cores needed and the best case, split by customer.
 - **Cores per cluster:** what one cluster of each size reserves (from `size-pods.json`), what it takes on a full
-  management cluster, and what limits how many fit, so it shows why a cluster takes more cores than it reserves.
+  management cluster, what limits how many fit, so it shows why a cluster takes more cores than it reserves, and the
+  best case.
 - **How the numbers are worked out:** the assumptions behind them.
 
 Its settings are the management cluster's (see "Cores per cluster on a full management cluster"): control-plane
@@ -465,10 +476,20 @@ copy with production's settings, outside the repo, as they're private:
     $PY cores_per_cluster.py --full N --other system=MACHINESxCORES infra=MACHINESxCORES --limit N \
         --output /tmp/cores-per-cluster-prod.json
     $PY build_pm_page.py --cores /tmp/cores-per-cluster-prod.json --output ~/pm-page-prod.html \
-        --settings-from "production's deployment configuration"
+        --settings-from "production's deployment configuration" --vm-families ~/vm-families-prod.json
 
-`--settings-from` says at the top of the page where the management cluster's size comes from. Share that copy
-privately, and don't commit it or its JSON.
+`--settings-from` says at the top of the page where the management cluster's size comes from. `--vm-families` gives
+each region's VM family for each pool of machines, `control_plane` and each `--other` pool, named as in the quota
+request (production's are in its deployment configuration's VM sizes and its quota files):
+
+    {
+      "source": "where the families come from, shown on the page",
+      "note": "anything else to say about them, shown under the table",
+      "regions": {"REGION": {"control_plane": "FAMILY", "system": "FAMILY", "infra": "FAMILY"}}
+    }
+
+Regions match the page's rows like its own grouping does, so "East US 2" finds "eastus2"; a region the file doesn't
+have shows as "not known for this region". Share that copy privately, and don't commit it or its JSON files.
 
 ## Known limitations
 
