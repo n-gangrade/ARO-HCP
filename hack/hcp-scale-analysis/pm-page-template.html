@@ -369,9 +369,9 @@
       "monitoring and cluster-management agents. Default: " + whole(d.other_cores) + ", " +
       (d.placeholders ? "a placeholder: the 49-node test's " : "") + d.other_text + ".";
     document.getElementById("limit-help").textContent = "1 to " + whole(DATA.clusters_service_limit) + ", as " +
-      "Clusters Service puts no more on one management cluster. Default: " + whole(d.limit) + ". The Service " +
-      "Lifecycle team's capacity alert counts a management cluster as full at 60, and asks for another above 51; " +
-      "what to plan with is theirs to confirm.";
+      "Clusters Service puts no more on one management cluster. Default: " + whole(d.limit) + ". The capacity " +
+      "alerts assume 60 and ask for another management cluster above 51, but no planning number is written down: " +
+      "to confirm with Steve and the Service Lifecycle team.";
   }
 
   function update() {

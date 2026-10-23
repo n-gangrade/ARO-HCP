@@ -34,7 +34,7 @@ agent pods there.
 
 Usage:
   python3 cores_per_cluster.py [--basis reserved|used] [--full N] [--other POOL=MACHINESxCORES ...] [--limit N]
-                               [--most N] [--seconds S] [--pods FILE] [--output FILE]
+                               [--most N] [--seconds S] [--pods FILE] [--room FILE] [--output FILE]
 
 Requires OR-Tools, which the scheduling simulator's environment has.
 """
@@ -56,10 +56,12 @@ FULL_PER_ZONE = 6
 # 49-node run, 1 system machine with 8 cores and 3 infra machines with 32 (to confirm; quota is planned for every
 # pool at its largest).
 OTHER_MACHINES = [("system", 1, 8), ("infra", 3, 32)]
-# The most hosted clusters to plan for on one management cluster: 60, where the Service Lifecycle team's capacity
-# alert counts a management cluster as full (observability/alerts/mgmt-capacity-prometheusRule.yaml, which asks for
-# another management cluster above 51), to confirm with them. Clusters Service's own limit is higher, but highly
-# available clusters run out of SWIFT NICs before it, and filling management clusters that far keeps nothing spare.
+# The most hosted clusters to plan for on one management cluster: 60, what the capacity alerts
+# (observability/alerts/mgmt-capacity-prometheusRule.yaml, which ask for another management cluster above 51) and the
+# SRE capacity dashboard assume, to confirm: no planning number is written down, the dashboard says 60 comes from
+# ClusterSizingConfiguration, where 60 is the small size's node count, and Clusters Service's own limit is higher.
+# Highly available clusters run out of SWIFT NICs before that, and filling management clusters that far keeps nothing
+# spare.
 LIMIT = 60
 # The most hosted clusters Clusters Service puts on one management cluster (clustersService.
 # provisionShardClusterLimit in config/config.yaml): the PM page's best case fills management clusters up to it.
@@ -77,6 +79,9 @@ FIELDS = {
                     "and --other",
     "limit": "the most hosted clusters to plan for on one management cluster",
     "clusters_service_limit": "the most hosted clusters Clusters Service puts on one management cluster",
+    "room_per_machine": "what one control-plane machine has room for once its system and the helper pods every "
+                        "machine runs have taken their share: pack_clusters.py's, or --room's",
+    "room_source": "where room_per_machine comes from, if --room gave it; null for pack_clusters.py's",
     "new_management_cluster_cores": "the cores of a full management cluster, control-plane and other machines: quota "
                                     "is planned per management cluster, for all its machines at their largest, so a "
                                     "region that needs another one needs all of these at once",
@@ -117,6 +122,11 @@ def parse_args():
                         help=f"the solver's limit for each number of machines (default: {SECONDS})")
     parser.add_argument("--pods", default=pc.DEFAULT_PODS,
                         help="pods per t-shirt size from size_pods.py (default: size-pods.json next to this script)")
+    parser.add_argument("--room", metavar="FILE",
+                        help="what one control-plane machine has room for, as JSON with cpu_cores, memory_gib, "
+                             "swift_nics and pods (in whole thousandths), and an optional source, such as a "
+                             "production machine's allocatable room less its daemonsets' requests; production's are "
+                             "private, so keep the file out of this repo (default: what pack_clusters.py works out)")
     parser.add_argument("--output",
                         help="file to write (default: cores-per-cluster.json, or cores-per-cluster-used.json with "
                              "--basis used, next to this script)")
@@ -135,6 +145,21 @@ def other_pool(text):
     if not pool or not machines.isdigit() or not cores.isdigit():
         raise argparse.ArgumentTypeError(f"{text}: give it as POOL=MACHINESxCORES, such as infra=3x32")
     return pool, int(machines), int(cores)
+
+
+def use_room(path):
+    """Replaces the room per machine with --room's, everywhere it's used, and returns its source."""
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        room = {resource: float(data[resource]) for resource in pc.RESOURCES}
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        sys.exit(f"couldn't read the room per machine from {path}: {error}")
+    if any(value <= 0 for value in room.values()):
+        sys.exit(f"{path}: the room per machine must be more than 0 of everything")
+    pc.ROOM.update(room)
+    ROOM.update({resource: cp.whole(room[resource], resource) for resource in pc.RESOURCES})
+    return data.get("source")
 
 
 def load_sizes(path, basis):
@@ -296,6 +321,7 @@ def main():
         import ortools  # noqa: F401
     except ImportError:
         sys.exit("this needs OR-Tools; use the scheduling simulator's environment (../scheduling-simulator/venv)")
+    room_source = use_room(os.path.expanduser(args.room)) if args.room else None
     other_cores = sum(machines * cores for _, machines, cores in args.other)
     full_cores = pc.ZONES * args.full * pc.MACHINE_CORES
     sizes, broken = [], 0
@@ -346,6 +372,7 @@ def main():
             "limit": args.limit,
             "clusters_service_limit": CLUSTERS_SERVICE_LIMIT,
             "room_per_machine": pc.ROOM,
+            "room_source": room_source,
         },
         "new_management_cluster_cores": full_cores + other_cores,
         "fields": FIELDS,

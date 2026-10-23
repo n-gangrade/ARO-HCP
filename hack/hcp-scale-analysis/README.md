@@ -252,13 +252,17 @@ only needs its cores, memory and network cards.
   Azure lists 256 GiB), 7 SWIFT NICs (its network cards other than the primary one, which mgmt-agent counts and
   offers to the scheduler, `countSwiftNICs` in `mgmt-agent/pkg/controller/controller.go`; `secondaryNicCount` in
   `config/config.yaml`) and 225 pod slots (`maxPods` in `dev-infrastructure/modules/aks-cluster-base.bicep`). It
-  keeps back 3 cores and 7550 MiB for the system (the kubelet's system reservation, `mgmt-fixes/deploy/kubelet-ds`),
-  and room for the 14 helper pods every control-plane machine runs: in the 49-node run, each of its 18 ran the same
+  keeps back 3 cores and 7,524 MiB for the system: the kubelet's system reservation, 3,000m of CPU per 32 CPUs and
+  7,550 MiB of memory per 256 GiB, scaled to the machine's memory and rounded up
+  (`mgmt-fixes/deploy/kubelet-ds/files/system-reserved.sh`), plus AKS's 100 MiB memory eviction threshold. It also
+  keeps room for the 14 helper pods every control-plane machine runs: in the 49-node run, each of its 18 ran the same
   14, kube-system's network, storage, monitoring and security agents, arobit's log forwarder and velero's node agent.
   What those reserve isn't in the data, so the packing uses the scheduling simulator's measurement of what such pods
   used on a production management cluster, 0.468 cores and 3.5 GiB per machine (`node_overhead_*` in
   `../scheduling-simulator/optimize/engine.py`); in the 49-node run, the pods outside the control planes used 2.2 to
-  4.8 GiB per machine. That leaves 28.532 cores, 240.819 GiB, 7 SWIFT NICs and 211 pod slots per machine.
+  4.8 GiB per machine. Production's daemonsets request somewhat more, so `cores_per_cluster.py --room` can take a
+  production machine's measured room instead. That leaves 28.532 cores, 240.844 GiB, 7 SWIFT NICs and 211 pod slots
+  per machine.
 
 How it packs: the sizes in a fixed order, small to xxlarge, so the answer doesn't depend on the order they're given;
 first the components with a copy in every zone, then the rest, each biggest first. Each copy goes to a zone where it
@@ -346,15 +350,23 @@ these placeholders:
   cluster had with its 12 hosted clusters; a full one can have more.
 - **Its other machines** (`--other`): 1 system machine with 8 cores and 3 infra machines with 32, what the 49-node
   run's management cluster had. Quota is planned with every pool at its largest, so count them at their largest.
-- **The most hosted clusters to plan for per management cluster** (`--limit`): 60, where the Service Lifecycle team's
-  capacity alert (`observability/alerts/mgmt-capacity-prometheusRule.yaml`) counts a management cluster as full; above
-  51 it asks for another management cluster. It's to confirm with them: the alert has kept the `info` severity it was
-  given for testing since December 2025, its commits give no reason for 60, and it predates placement by SWIFT NICs.
+- **The most hosted clusters to plan for per management cluster** (`--limit`): 60, what the capacity alerts
+  (`observability/alerts/mgmt-capacity-prometheusRule.yaml`, which ask for another management cluster above 51) and
+  the SRE capacity dashboard (`observability/grafana-dashboards/sre/user-journey/mgmt-capacity-planning.json`)
+  assume. It's to confirm: no planning number is written down, and 60 may be a mix-up. The dashboard says it comes
+  from ClusterSizingConfiguration, where 60 is the small size's node count, not clusters per management cluster, and
+  when the alerts were added ([#3601](https://github.com/Azure/ARO-HCP/pull/3601)), a reviewer asked why 60 rather
+  than 100, with no answer. The alerts have kept the `info` severity they were given for testing since December 2025,
+  have gone to the shared DEV queue since September 2026 ([#6878](https://github.com/Azure/ARO-HCP/pull/6878)), link
+  to a runbook that doesn't resolve, and predate placement by SWIFT NICs
+  ([#6657](https://github.com/Azure/ARO-HCP/pull/6657)).
   Clusters Service puts at most 100 on one (`clustersService.provisionShardClusterLimit` in `config/config.yaml`,
   `clusters_service_limit`), the most `--limit` can be, but highly available clusters, which need a SWIFT NIC in each
   zone, run out of them first. Filling management clusters until they run out of room keeps nothing spare for
-  upgrades, a zone failure or the time a new management cluster takes to add, and as the placement controller only
-  counts SWIFT NICs, it could put more large and bigger clusters on a management cluster than its memory holds.
+  upgrades, a zone failure, test clusters (production's end-to-end tests also create hosted clusters, in a region
+  picked when they run: `test/e2e-config/e2e-slots.yaml`) or the time a new management cluster takes to add, and as
+  the placement controller only counts SWIFT NICs, it could put more large and bigger clusters on a management
+  cluster than its memory holds.
 
 With these settings:
 
@@ -426,8 +438,9 @@ These depend on assumptions, recorded in the file's `settings`:
   sample fleet (200 clusters of 12 nodes, 150 of 30, 80 of 60, 40 of 120 and 10 of 250), plus 10 of each size it
   lacks. `--mix` replaces it, for example `--mix 12=300,30=100,120=20`.
 - **The machines.** By default (`--machines production`) they're production's: hosted control planes run on 32-core
-  `Standard_E32ds_v6` machines (`mgmt.aks.userAgentPool.vmSize` in `config/config.yaml`), each keeping back the same
-  fixed 3 cores and 7550 MiB for the system as production's kubelet (`mgmt-fixes/deploy/kubelet-ds`). The simulator
+  `Standard_E32ds_v6` machines (`mgmt.aks.userAgentPool.vmSize` in `config/config.yaml`), each keeping back a fixed
+  3 cores and 7550 MiB for the system, about what production's kubelet keeps back (`mgmt-fixes/deploy/kubelet-ds`;
+  7,524 MiB on these machines, with AKS's eviction threshold). The simulator
   always sizes a second pool, which can't use the first pool's machine type; with today's placement it only holds
   the spare copies kept for upgrades, which production keeps on the same machines, so it gets the same machine
   under another name (one per management cluster, merged back in the output). On these machines the sample mix
@@ -474,9 +487,15 @@ To change the layout, edit `pm-page-template.html` and rebuild; `build_pm_page.p
 copy with production's settings, outside the repo, as they're private:
 
     $PY cores_per_cluster.py --full N --other system=MACHINESxCORES infra=MACHINESxCORES --limit N \
-        --output /tmp/cores-per-cluster-prod.json
+        --room ~/machine-room-prod.json --output /tmp/cores-per-cluster-prod.json
     $PY build_pm_page.py --cores /tmp/cores-per-cluster-prod.json --output ~/pm-page-prod.html \
         --settings-from "production (WHERE AND WHEN)" --vm-families ~/vm-families-prod.json
+
+`--room` gives what one production control-plane machine has room for: its allocatable CPU, memory and pods less
+what the daemonsets every machine runs request, and its SWIFT NICs, in whole thousandths. The page's notes show its
+`source`:
+
+    {"source": "where the room comes from", "cpu_cores": 0, "memory_gib": 0, "swift_nics": 0, "pods": 0}
 
 `--settings-from` says at the top of the page where the management cluster's size comes from ("Management clusters
 as in production (...)"). `--vm-families` gives each region's VM family for each pool of machines, `control_plane`

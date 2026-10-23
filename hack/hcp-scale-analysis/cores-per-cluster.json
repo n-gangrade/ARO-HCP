@@ -22,10 +22,11 @@
     "clusters_service_limit": 100,
     "room_per_machine": {
       "cpu_cores": 28.532,
-      "memory_gib": 240.819,
+      "memory_gib": 240.844,
       "swift_nics": 7.0,
       "pods": 211.0
-    }
+    },
+    "room_source": null
   },
   "new_management_cluster_cores": 680,
   "fields": {
@@ -35,6 +36,8 @@
     "placeholders": "true if full_machines_per_zone and other_machines are this script's placeholders, what the 49-node run's management cluster had (it wasn't full), rather than numbers given with --full and --other",
     "limit": "the most hosted clusters to plan for on one management cluster",
     "clusters_service_limit": "the most hosted clusters Clusters Service puts on one management cluster",
+    "room_per_machine": "what one control-plane machine has room for once its system and the helper pods every machine runs have taken their share: pack_clusters.py's, or --room's",
+    "room_source": "where room_per_machine comes from, if --room gave it; null for pack_clusters.py's",
     "new_management_cluster_cores": "the cores of a full management cluster, control-plane and other machines: quota is planned per management cluster, for all its machines at their largest, so a region that needs another one needs all of these at once",
     "clusters_that_fit": "the most clusters of the size that fit on a management cluster with 1, 2, ... control-plane machines per zone, by the rules pack_clusters.py follows",
     "not_proven": "for numbers of machines per zone where clusters_that_fit isn't proven to be the most possible: the most the machines' room allows in total",

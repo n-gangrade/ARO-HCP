@@ -64,14 +64,23 @@ RESOURCE_NAMES = {"cpu_cores": "CPU (cores)", "memory_gib": "memory (GiB)", "swi
 #   scheduler (countSwiftNICs in mgmt-agent/pkg/controller/controller.go): 7 (secondaryNicCount in config/config.yaml)
 # - pods: maxPods of the control-plane pools (dev-infrastructure/modules/aks-cluster-base.bicep)
 MACHINE_HAS = {"cpu_cores": 32.0, "memory_gib": 251.7, "swift_nics": 7, "pods": 225}
-# The kubelet's system reservation on every machine (mgmt-fixes/deploy/kubelet-ds)
-SYSTEM_RESERVED = {"cpu_cores": 3.0, "memory_gib": 7550 / 1024, "swift_nics": 0, "pods": 0}
+# The kubelet's system reservation on every machine (mgmt-fixes/deploy/kubelet-ds/files/system-reserved.sh): 3,000m of
+# CPU per 32 CPUs and 7,550 MiB of memory per 256 GiB, scaled to the machine's memory and rounded up, plus AKS's
+# 100 MiB memory eviction threshold (memory.available<100Mi from AKS 1.29).
+EVICTION_MIB = 100
+SYSTEM_RESERVED = {
+    "cpu_cores": math.ceil(MACHINE_HAS["cpu_cores"] * 3000 / 32) / 1000,
+    "memory_gib": (math.ceil(MACHINE_HAS["memory_gib"] * 1024 * 1024 * 7550 / 268435456) + EVICTION_MIB) / 1024,
+    "swift_nics": 0,
+    "pods": 0,
+}
 # The helper pods (daemonsets) every control-plane machine runs: in the 49-node run, each of the 18 ran the same 14
 # (kube-system's network, storage, monitoring and security agents, arobit's log forwarder and velero's node agent).
 # What they reserve isn't in the data, so their CPU and memory are the scheduling simulator's stand-in
 # (node_overhead_cpu_mc and node_overhead_mem_mib in ../scheduling-simulator/optimize/engine.py), measured as what
 # such pods used on a production management cluster; in the 49-node run, the pods outside the control planes used
-# 2.2 to 4.8 GiB per machine.
+# 2.2 to 4.8 GiB per machine. Production's daemonsets request somewhat more; cores_per_cluster.py --room takes a
+# machine's measured room instead.
 HELPER_PODS = {"cpu_cores": 0.468, "memory_gib": 3592 / 1024, "swift_nics": 0, "pods": 14}
 # What's left for control-plane pods, rounded down to thousandths, as precise as size-pods.json's numbers, so that
 # check_packing.py can repeat the arithmetic exactly in whole thousandths.
