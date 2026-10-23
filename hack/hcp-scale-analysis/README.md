@@ -382,9 +382,11 @@ Not included:
   only counts SWIFT NICs. For small and medium clusters, whose SWIFT NICs run out first, the placement controller
   stops where the solver does; large and bigger ones may take more machines in production, and the placement
   controller could put more of them on a management cluster than its memory holds.
-- **Mixing sizes:** each size's share assumes a management cluster full of that size. Small and medium clusters run
-  out of SWIFT NICs and larger ones out of memory, so a management cluster holding both can hold more than their
-  shares add up to.
+- **Mixing sizes:** each size's share assumes a management cluster full of that size. Smaller clusters are stopped by
+  the limit or SWIFT NICs and larger ones by memory, so a management cluster holding both can hold more than their
+  shares add up to, by up to about half. For example, with these settings one holds 35 small and 7 xxlarge clusters,
+  whose shares add up to 1.47 management clusters (checked with the same rules and solver; one more xxlarge doesn't
+  fit). The PM page keeps the shares, which can overstate a region that mixes them.
 - Spare room for upgrades, a zone failure or new clusters, and the cluster autoscaler of clusters that use
   autoscaling.
 - **The shared pods on the control-plane machines**, which in the 49-node run used 3.5 GiB and about 2.5 cores in all.

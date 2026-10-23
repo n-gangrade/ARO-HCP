@@ -88,9 +88,9 @@ def notes(cores, reserved_from, settings_from, families):
         f"How many fit: the most clusters of each size that fit on a full management cluster, worked out exactly and "
         f"checked part by part against production's rules. Copies of the same part of a cluster go in different "
         f"availability zones ({settings['zones']} zones). Each {settings['machine_cores']}-core machine has room for "
-        f"{room['cpu_cores']:g} cores, {room['memory_gib']:g} GiB of memory, {room['swift_nics']:g} network cards and "
-        f"{room['pods']:g} pods once its own system has taken its share, and every cluster needs a network card in "
-        f"each zone, for its router.",
+        f"{room['cpu_cores']:g} cores, {room['memory_gib']:g} GiB of memory (measured on one machine type), "
+        f"{room['swift_nics']:g} network cards and {room['pods']:g} pods once its own system has taken its share, and "
+        f"every cluster needs a network card in each zone, for its router.",
         "Own cores: one cluster's share of the machines its control plane runs on, the control-plane machines: their "
         "cores divided by the clusters that fit.",
         "Shared (amortized) cores: one cluster's share of what's there for all the clusters: the management cluster's "
@@ -117,8 +117,9 @@ def notes(cores, reserved_from, settings_from, families):
         "Not included: spare room for upgrades, a zone failure or new clusters; the cluster autoscaler of clusters "
         "that use autoscaling; the shared pods some control-plane machines run, such as the HyperShift operator's. "
         "The numbers assume machines are packed as tightly as the rules allow, which production may not manage for "
-        "large and bigger clusters. Mixing sizes on a management cluster packs a little better than their shares add "
-        "up to.",
+        "large and bigger clusters. Mixing sizes on a management cluster packs better than their shares add up to, "
+        "as smaller clusters are stopped by the limit or network cards and bigger ones by memory: a region with both "
+        "can be overstated by up to about half.",
         "These are estimates for planning, not an exact count.",
     ]
 

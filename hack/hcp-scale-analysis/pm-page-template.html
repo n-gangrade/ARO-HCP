@@ -67,8 +67,7 @@
 
   <section>
     <h2>Cores needed</h2>
-    <p class="muted">Own: the clusters' control planes. Shared (amortized): their part of the machines all clusters
-      share, such as logging and monitoring.</p>
+    <p class="muted" id="results-intro"></p>
     <table id="results">
       <thead>
         <tr>
@@ -218,7 +217,8 @@
       shared: total - own,
       total,
       bestTotal: (controlPlaneCores + settings.otherCores) / Math.min(fit, DATA.clusters_service_limit),
-      why: held < fit ? "the planning limit" : "then " + runsOut + (runsOut.endsWith("s") ? " run out" : " runs out"),
+      why: held < fit ? "the planning limit (" + whole(fit) + " fit)"
+                      : "then " + runsOut + (runsOut.endsWith("s") ? " run out" : " runs out"),
     };
   }
 
@@ -334,7 +334,7 @@
     return families;
   }
 
-  // " of FAMILY" for one VM family, or ": 115 of A and 16 of B": whole cores split in proportion, the biggest family
+  // " of FAMILY" for one VM family, or " (115 of A and 16 of B)": whole cores split in proportion, the biggest family
   // taking what rounding leaves, so they add up.
   function byFamily(total, families) {
     const all = [...families.values()].reduce((sum, c) => sum + c, 0);
@@ -347,7 +347,7 @@
       rest -= p.cores;
     }
     parts[0].cores = Math.max(0, rest);
-    return ": " + andList(parts.map((p) => whole(p.cores) + " of " + p.family));
+    return " (" + andList(parts.map((p) => whole(p.cores) + " of " + p.family)) + ")";
   }
 
   function showSettings(settings) {
@@ -384,6 +384,13 @@
     const controlPlaneCores = DATA.zones * settings.machinesPerZone * DATA.machine_cores;
     const managementCluster = controlPlaneCores + settings.otherCores;
     const regions = tally(rows, settings);
+
+    // The shared cores include control-plane room left free only where the limit stops clusters before room does.
+    const limitKeepsRoom = SIZES.some((s) => s.clusters_that_fit[settings.machinesPerZone - 1] > settings.limit);
+    document.getElementById("results-intro").textContent = "Each row is the clusters' share of their region's " +
+      "management clusters. Own: their control planes. Shared (amortized): their part of the logging and " +
+      "monitoring machines" + (limitKeepsRoom ? ", and of the room kept free by planning at most " +
+      whole(settings.limit) + " clusters per management cluster." : ".");
 
     const body = document.querySelector("#results tbody");
     const foot = document.querySelector("#results tfoot");
@@ -438,7 +445,7 @@
     const most = cores(Math.max(...reserved));
     document.getElementById("sizes-intro").textContent = "A cluster reserves only " +
       (least === most ? "about " + least : least + " to " + most) + " cores, but takes its share of a whole " +
-      "management cluster: " + whole(managementCluster) + " cores \u00f7 the clusters that fit on one.";
+      "management cluster: " + whole(managementCluster) + " cores \u00f7 the clusters planned on each.";
     document.querySelector("#sizes tbody").replaceChildren(...SIZES.map((s) => {
       const one = perCluster(s, settings);
       return row([
