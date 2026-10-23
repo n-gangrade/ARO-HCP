@@ -442,32 +442,30 @@ These depend on assumptions, recorded in the file's `settings`:
 ## PM page
 
 `pm-page.html` is a single file with the numbers built in: open it in a browser, or send it to someone. It needs no
-server, network connection or other files. Add a row for each customer, region, cluster size and number of clusters,
-and it shows, using `cores-per-cluster.json`'s numbers:
+server, network connection or other files. It's kept short for PMs: add a row for each customer, region, cluster size
+and number of clusters, and it shows, using `cores-per-cluster.json`'s numbers:
 
-- **Cores needed per region:** the clusters' own cores, their amortized cores and the total, rounded up to whole cores
-  (each row on its own, so rows can add up to a little more than a total), an average share of the management
-  clusters; the best case, the same if management clusters are filled until they run out of room, up to Clusters
-  Service's limit, keeping nothing spare; their share of a full management cluster; and, if the region has no room,
-  how many whole management clusters it needs, times their cores: quota comes in whole management clusters, so that's
-  the share rounded up. A region whose management clusters have room for the clusters needs no new quota for them.
-- **Quota by VM family,** only in a copy built with `--vm-families`: the same per region, split by the VM family of the
-  machines the cores are on, as Azure grants quota per region and VM family. A family's cores are the region's share
-  of a management cluster times that family's cores on one.
-- **Per customer and region:** the cores needed and the best case, split by customer.
-- **Cores per cluster:** what one cluster of each size reserves (from `size-pods.json`), what it takes on a full
-  management cluster, what limits how many fit, so it shows why a cluster takes more cores than it reserves, and the
-  best case.
-- **How the numbers are worked out:** the assumptions behind them.
+- **Cores needed:** one table, each region with its customers under it: their clusters, own cores, shared (amortized)
+  cores and the two added up, an average share of the region's management clusters. Each customer's are rounded up to
+  whole cores, and a region's are its customers' added up, so every row adds up.
+- **Quota:** a line per region with the cores its clusters take and, as quota comes in whole management clusters, how
+  many new ones it needs if it has no room left (their share rounded up) and their cores. A region whose management
+  clusters have room for the clusters needs no new quota for them. A copy built with `--vm-families` splits both by
+  the VM family of the machines the cores are on, as Azure grants quota per region and VM family.
+- **Why: cores per cluster:** that a cluster reserves only about 4.6 cores (from `size-pods.json`) but takes its share
+  of a whole management cluster, and for each size how many fit on one and what stops more, its own and shared cores,
+  and the best case, the same if management clusters are filled until they run out of room, up to Clusters Service's
+  limit, keeping nothing spare.
+- **For engineers,** collapsed: the settings and how the numbers are worked out.
 
 Its settings are the management cluster's (see "Cores per cluster on a full management cluster"): control-plane
 machines per zone, the cores of its other machines and the most hosted clusters on one. They start at
-`cores-per-cluster.json`'s, and can be changed on the page. While its management cluster's machines are
-`cores_per_cluster.py`'s placeholders (`settings.placeholders`) and unchanged on the page, a banner at the top says
-the numbers aren't production's. As the page can't run the solver, its control-plane machines are always the 32-core
-machines the numbers were worked out for, with 1 to 20 per zone. Regions are free text, used to group the rows:
-"East US 2" and "eastus2" count as the same region, shown as first typed, and rows with no region are counted under
-"(no region)", with a notice.
+`cores-per-cluster.json`'s, and can be changed on the page, which then says so above the results. While its
+management cluster's machines are `cores_per_cluster.py`'s placeholders (`settings.placeholders`) and unchanged on
+the page, a banner at the top says the numbers aren't production's. As the page can't run the solver, its
+control-plane machines are always the 32-core machines the numbers were worked out for, with 1 to 20 per zone.
+Regions are free text, used to group the rows: "East US 2" and "eastus2" count as the same region, shown as first
+typed, and rows with no region are counted under "(no region)", with a notice.
 
 To change the layout, edit `pm-page-template.html` and rebuild; `build_pm_page.py` fills in the numbers where it says
 `__PAGE_DATA__`, and stops if its inputs don't hold what the page says about them. For real quota requests, build a
@@ -476,20 +474,22 @@ copy with production's settings, outside the repo, as they're private:
     $PY cores_per_cluster.py --full N --other system=MACHINESxCORES infra=MACHINESxCORES --limit N \
         --output /tmp/cores-per-cluster-prod.json
     $PY build_pm_page.py --cores /tmp/cores-per-cluster-prod.json --output ~/pm-page-prod.html \
-        --settings-from "production's deployment configuration" --vm-families ~/vm-families-prod.json
+        --settings-from "production (WHERE AND WHEN)" --vm-families ~/vm-families-prod.json
 
-`--settings-from` says at the top of the page where the management cluster's size comes from. `--vm-families` gives
-each region's VM family for each pool of machines, `control_plane` and each `--other` pool, named as in the quota
-request (production's are in its deployment configuration's VM sizes and its quota files):
+`--settings-from` says at the top of the page where the management cluster's size comes from ("Management clusters
+as in production (...)"). `--vm-families` gives each region's VM family for each pool of machines, `control_plane`
+and each `--other` pool, named as in the quota request (production's are in its deployment configuration's VM sizes
+and its quota files):
 
     {
-      "source": "where the families come from, shown on the page",
-      "note": "anything else to say about them, shown under the table",
+      "source": "where the families come from, shown in the page's notes",
+      "note": "anything else to say about them, shown in the page's notes",
       "regions": {"REGION": {"control_plane": "FAMILY", "system": "FAMILY", "infra": "FAMILY"}}
     }
 
-Regions match the page's rows like its own grouping does, so "East US 2" finds "eastus2"; a region the file doesn't
-have shows as "not known for this region". Share that copy privately, and don't commit it or its JSON files.
+Regions match the page's rows like its own grouping does, so "East US 2" finds "eastus2", and the page suggests the
+file's regions as one is typed; a region the file doesn't have shows "VM family not known for this region". Share
+that copy privately, and don't commit it or its JSON files.
 
 ## Known limitations
 

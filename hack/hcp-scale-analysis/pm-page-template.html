@@ -3,44 +3,47 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Hosted control plane cores estimate</title>
+<title>Hosted control plane quota estimate</title>
 <style>
-  body { font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #1f2328; max-width: 1100px; margin: 2rem auto; padding: 0 1rem; }
+  body {
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: #1f2328; max-width: 1000px; margin: 2rem auto; padding: 0 1rem;
+  }
   h1 { font-size: 1.6rem; margin: 0 0 .25rem; }
   h2 { font-size: 1.2rem; margin: 2rem 0 .5rem; padding-bottom: .25rem; border-bottom: 1px solid #d0d7de; }
+  h3 { font-size: 1rem; margin: 1.5rem 0 .5rem; }
   .muted { color: #57606a; }
   table { border-collapse: collapse; width: 100%; margin: .5rem 0; }
   th, td { padding: .35rem .5rem; border-bottom: 1px solid #d0d7de; text-align: left; vertical-align: middle; }
   th { background: #f6f8fa; font-weight: 600; }
   .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
   th.num { white-space: normal; }
-  tfoot td { font-weight: 600; }
+  tr.region td { font-weight: 600; background: #f6f8fa; }
+  tr.customer td:first-child { padding-left: 1.75rem; }
+  tfoot td { font-weight: 600; border-top: 2px solid #8c959f; }
   input, select, button { font: inherit; }
   input[type="text"] { width: 100%; box-sizing: border-box; }
   input[type="number"] { width: 6rem; text-align: right; }
   input[aria-invalid="true"] { outline: 2px solid #cf222e; }
   button { cursor: pointer; }
   .notice { border-left: 4px solid #bf8700; background: #fff8c5; padding: .5rem .75rem; margin: .75rem 0; }
-  .callout { border-left: 4px solid #0969da; background: #ddf4ff; padding: .5rem .75rem; margin: .75rem 0; }
   .empty { color: #57606a; font-style: italic; }
-  details { margin: .75rem 0; }
+  #quota { padding-left: 1.25rem; }
+  #quota li { margin: .4rem 0; }
+  details { margin: 2.5rem 0 1rem; padding-top: .75rem; border-top: 1px solid #d0d7de; }
   summary { cursor: pointer; font-weight: 600; }
   .settings label { display: block; font-weight: 600; margin-top: .75rem; }
   .settings .help { display: block; color: #57606a; font-weight: normal; }
-  @media print { .no-print { display: none !important; } details { display: block; } }
+  @media print { .no-print { display: none !important; } }
 </style>
 </head>
 <body>
 <header>
-  <h1>Hosted control plane cores estimate</h1>
-  <p class="muted">How many cores ARO-HCP needs to run customers' hosted control planes, per region and per customer:
-    each cluster's own compute and its amortized share of what all the clusters share, and the quota a region needs
-    if its management clusters are full. Add a row for each customer, region and cluster size; everything updates as
-    you type.</p>
-  <p class="notice" id="placeholder-banner" hidden>Placeholder settings: these numbers use the size of a test
-    management cluster, not production's. For real quota requests, use a copy of this page built with production's
-    settings.</p>
-  <p class="callout" id="settings-source" hidden></p>
+  <h1>Hosted control plane quota estimate</h1>
+  <p class="muted">Enter each customer's clusters to see the cores they need in each region, and why.</p>
+  <p class="notice" id="placeholder-banner" hidden>Example numbers: they use a test management cluster, not
+    production's. Use the production copy of this page for real quota requests.</p>
+  <p class="muted" id="settings-source" hidden></p>
 </header>
 
 <main>
@@ -60,113 +63,69 @@
     </table>
     <button type="button" id="add-row" class="no-print">Add a row</button>
     <div id="notices" aria-live="polite"></div>
-    <details class="settings" id="settings">
-      <summary id="settings-summary"></summary>
-      <p class="muted" id="settings-intro"></p>
-      <label for="machines-per-zone">Control-plane machines per availability zone on a full management cluster
-        <span class="help" id="machines-help"></span></label>
-      <input type="number" id="machines-per-zone" min="1" step="1">
-      <label for="other-cores">Cores of a management cluster's other machines
-        <span class="help" id="other-help"></span></label>
-      <input type="number" id="other-cores" min="0" step="1">
-      <label for="limit">Most hosted clusters to plan for per management cluster
-        <span class="help" id="limit-help"></span></label>
-      <input type="number" id="limit" min="1" step="1">
-      <p><button type="button" id="reset-settings" class="no-print">Back to the defaults</button></p>
-    </details>
   </section>
 
   <section>
-    <h2>Cores needed per region</h2>
-    <p class="muted">Own cores are the clusters' share of the machines their control planes run on; amortized cores
-      are their share of what's there for all the clusters, such as the machines that run logging, monitoring and
-      cluster-management agents. Cores needed are the total rounded up to whole cores, each row on its own, so rows can
-      add up to a little more than a total; best case is the same if management clusters are filled until they run out
-      of room, keeping nothing spare. Share of a management cluster is how many full management clusters' worth the
-      clusters take; if the region has no room, it needs that share rounded up to whole management clusters.</p>
-    <table id="by-region">
+    <h2>Cores needed</h2>
+    <p class="muted">Own: the clusters' control planes. Shared (amortized): their part of the machines all clusters
+      share, such as logging and monitoring.</p>
+    <table id="results">
       <thead>
         <tr>
-          <th scope="col">Region</th>
+          <th scope="col">Region and customer</th>
           <th scope="col" class="num">Clusters</th>
-          <th scope="col" class="num">Own cores</th>
-          <th scope="col" class="num">Amortized cores</th>
-          <th scope="col" class="num">Total cores</th>
-          <th scope="col" class="num">Cores needed (average share)</th>
-          <th scope="col" class="num">Best case</th>
-          <th scope="col" class="num">Share of a management cluster</th>
-          <th scope="col" class="num">If the region has no room: management clusters × cores</th>
+          <th scope="col" class="num">Own</th>
+          <th scope="col" class="num">Shared</th>
+          <th scope="col" class="num">Cores needed</th>
         </tr>
       </thead>
       <tbody></tbody>
       <tfoot></tfoot>
     </table>
-    <p class="callout" id="management-cluster"></p>
-  </section>
-
-  <section id="families-section" hidden>
-    <h2>Quota by VM family</h2>
-    <p class="muted" id="families-intro"></p>
-    <table id="by-family">
-      <thead>
-        <tr>
-          <th scope="col">Region</th>
-          <th scope="col">VM family</th>
-          <th scope="col">For</th>
-          <th scope="col" class="num">Cores needed (average share)</th>
-          <th scope="col" class="num">If the region has no room: management clusters × cores</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
-    <p class="muted" id="families-note"></p>
   </section>
 
   <section>
-    <h2>Per customer and region</h2>
-    <table id="by-customer">
-      <thead>
-        <tr>
-          <th scope="col">Customer</th>
-          <th scope="col">Region</th>
-          <th scope="col" class="num">Clusters</th>
-          <th scope="col" class="num">Own cores</th>
-          <th scope="col" class="num">Amortized cores</th>
-          <th scope="col" class="num">Total cores</th>
-          <th scope="col" class="num">Cores needed (average share)</th>
-          <th scope="col" class="num">Best case</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
+    <h2>Quota</h2>
+    <p class="muted" id="quota-intro"></p>
+    <ul id="quota"></ul>
   </section>
 
   <section>
-    <h2>Cores per cluster</h2>
+    <h2>Why: cores per cluster</h2>
     <p class="muted" id="sizes-intro"></p>
     <table id="sizes">
       <thead>
         <tr>
           <th scope="col">Cluster size</th>
-          <th scope="col" class="num">Cores it reserves</th>
-          <th scope="col" class="num">Memory it reserves (GiB)</th>
-          <th scope="col" class="num">Clusters per management cluster</th>
-          <th scope="col">Limited by</th>
-          <th scope="col" class="num">Own cores</th>
-          <th scope="col" class="num">Amortized cores</th>
-          <th scope="col" class="num">Total cores</th>
-          <th scope="col" class="num">Best case: clusters per management cluster</th>
-          <th scope="col" class="num">Best case: total cores</th>
+          <th scope="col">Clusters per management cluster</th>
+          <th scope="col" class="num">Own</th>
+          <th scope="col" class="num">Shared</th>
+          <th scope="col" class="num">Cores per cluster</th>
+          <th scope="col" class="num">Best case</th>
         </tr>
       </thead>
       <tbody></tbody>
     </table>
+    <p class="muted">Best case: if management clusters were filled until they ran out of room, keeping nothing
+      spare.</p>
   </section>
 
-  <section>
-    <h2>How these numbers are worked out</h2>
+  <details class="settings" id="settings">
+    <summary>For engineers: settings, and how these numbers are worked out</summary>
+    <p class="muted" id="settings-intro"></p>
+    <label for="machines-per-zone">Control-plane machines per availability zone
+      <span class="help" id="machines-help"></span></label>
+    <input type="number" id="machines-per-zone" min="1" step="1">
+    <label for="other-cores">Cores of the other machines
+      <span class="help" id="other-help"></span></label>
+    <input type="number" id="other-cores" min="0" step="1">
+    <label for="limit">Most clusters to plan for per management cluster
+      <span class="help" id="limit-help"></span></label>
+    <input type="number" id="limit" min="1" step="1">
+    <p><button type="button" id="reset-settings" class="no-print">Back to the defaults</button></p>
+    <h3>How these numbers are worked out</h3>
     <ul id="notes"></ul>
-  </section>
+  </details>
 </main>
 
 <script id="page-data" type="application/json">__PAGE_DATA__</script>
@@ -176,10 +135,11 @@
   const DATA = JSON.parse(document.getElementById("page-data").textContent);
   const SIZES = DATA.sizes;
   const BY_SIZE = new Map(SIZES.map((s) => [s.size, s]));
+  const FAMILY_REGIONS = DATA.vm_families ? new Map(Object.entries(DATA.vm_families.regions)) : null;
   const MOST_PER_ZONE = SIZES[0].clusters_that_fit.length;
   const ONE_DECIMAL = new Intl.NumberFormat("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-  const TWO_DECIMALS = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const WHOLE = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+  const ENGINEERS = "see \u201cFor engineers\u201d at the bottom.";
   const inputRows = document.querySelector("#inputs tbody");
   const controls = {
     machines: document.getElementById("machines-per-zone"),
@@ -188,9 +148,16 @@
   };
 
   function cores(n) { return ONE_DECIMAL.format(n); }
+  function whole(n) { return WHOLE.format(n); }
+  // "1 core", "2 cores".
+  function count(n, one, many) { return whole(n) + " " + (n === 1 ? one : many); }
   // Rounds up, so 0 stays 0 rather than -0; the small allowance keeps float noise from adding a whole one.
   function roundUp(n) { return Math.max(0, Math.ceil(n - 1e-6)); }
   function regionKey(text) { return text.toLowerCase().replace(/[\s_-]+/g, ""); }
+  // "a", "a and b", "a, b and c".
+  function andList(items) {
+    return items.length < 2 ? items.join("") : items.slice(0, -1).join(", ") + " and " + items[items.length - 1];
+  }
 
   function cell(content, className) {
     const td = document.createElement("td");
@@ -199,10 +166,17 @@
     return td;
   }
 
-  function row(cells) {
+  function row(cells, className) {
     const tr = document.createElement("tr");
+    if (className) tr.className = className;
     tr.append(...cells);
     return tr;
+  }
+
+  function emptyRow(columns, text) {
+    const td = cell(text, "empty");
+    td.colSpan = columns;
+    return row([td]);
   }
 
   function sizeLabel(s) {
@@ -210,13 +184,12 @@
                              : (s.nodes_from === 0 ? "up to " : s.nodes_from + " to ") + s.nodes_to + " nodes") + ")";
   }
 
-  // The control's number if it's from low to high (no upper limit if high is null), and whole if `whole` is true;
-  // otherwise the fallback.
-  function readNumber(control, fallback, low, high, whole) {
+  // The control's number if it's from low to high, and whole if `whole` is true; otherwise the fallback.
+  function readNumber(control, fallback, low, high, wholeOnly) {
     const text = control.value.trim();
     const n = Number(text);
     const ok = text !== "" && Number.isFinite(n) && n >= low && (high === null || n <= high) &&
-               (!whole || Number.isInteger(n));
+               (!wholeOnly || Number.isInteger(n));
     control.setAttribute("aria-invalid", String(text !== "" && !ok));
     return ok ? n : fallback;
   }
@@ -236,18 +209,16 @@
     const controlPlaneCores = DATA.zones * settings.machinesPerZone * DATA.machine_cores;
     const fit = s.clusters_that_fit[settings.machinesPerZone - 1];
     const held = Math.min(fit, settings.limit);
-    const bestHeld = Math.min(fit, DATA.clusters_service_limit);
     const own = controlPlaneCores / fit;
     const total = (controlPlaneCores + settings.otherCores) / held;
+    const runsOut = s.runs_out_of[settings.machinesPerZone - 1];
     return {
       held,
       own,
-      amortized: total - own,
+      shared: total - own,
       total,
-      bestHeld,
-      bestTotal: (controlPlaneCores + settings.otherCores) / bestHeld,
-      limitedBy: held < fit ? "the limit of " + WHOLE.format(settings.limit) + " clusters"
-                            : s.runs_out_of[settings.machinesPerZone - 1],
+      bestTotal: (controlPlaneCores + settings.otherCores) / Math.min(fit, DATA.clusters_service_limit),
+      why: held < fit ? "the planning limit" : "then " + runsOut + (runsOut.endsWith("s") ? " run out" : " runs out"),
     };
   }
 
@@ -260,25 +231,26 @@
     region.type = "text";
     region.setAttribute("aria-label", "Region");
     region.placeholder = "such as eastus2";
+    if (FAMILY_REGIONS) region.setAttribute("list", "region-names");
     region.value = values.region || "";
     const size = document.createElement("select");
     size.setAttribute("aria-label", "Cluster size");
     size.append(new Option("Choose a size", ""));
     for (const s of SIZES) size.append(new Option(sizeLabel(s), s.size));
     size.value = values.size || "";
-    const count = document.createElement("input");
-    count.type = "number";
-    count.min = "0";
-    count.step = "1";
-    count.setAttribute("aria-label", "How many clusters");
-    count.value = values.count === undefined ? "1" : String(values.count);
+    const howMany = document.createElement("input");
+    howMany.type = "number";
+    howMany.min = "0";
+    howMany.step = "1";
+    howMany.setAttribute("aria-label", "How many clusters");
+    howMany.value = values.count === undefined ? "1" : String(values.count);
     const remove = document.createElement("button");
     remove.type = "button";
     remove.textContent = "Remove";
     remove.setAttribute("aria-label", "Remove this row");
-    const tr = row([cell(customer), cell(region), cell(size), cell(count, "num"), cell(remove, "no-print")]);
+    const tr = row([cell(customer), cell(region), cell(size), cell(howMany, "num"), cell(remove, "no-print")]);
     remove.addEventListener("click", () => { tr.remove(); update(); });
-    for (const control of [customer, region, size, count]) control.addEventListener("input", update);
+    for (const control of [customer, region, size, howMany]) control.addEventListener("input", update);
     inputRows.append(tr);
     update();
     return tr;
@@ -290,208 +262,190 @@
     let badCount = 0;
     let noRegion = 0;
     for (const tr of inputRows.rows) {
-      const [customer, region, size, count] = tr.querySelectorAll("input, select");
-      const n = Number(count.value);
-      const countOk = count.value.trim() !== "" && Number.isInteger(n) && n >= 0;
-      count.setAttribute("aria-invalid", String(!countOk));
+      const [customer, region, size, howMany] = tr.querySelectorAll("input, select");
+      const n = Number(howMany.value);
+      const countOk = howMany.value.trim() !== "" && Number.isInteger(n) && n >= 0;
+      howMany.setAttribute("aria-invalid", String(!countOk));
       if (!countOk) { badCount++; continue; }
       if (!BY_SIZE.has(size.value)) {
         if (customer.value.trim() || region.value.trim()) missingSize++;
         continue;
       }
       if (!region.value.trim()) noRegion++;
-      rows.push({ customer: customer.value.trim(), region: region.value.trim(), size: BY_SIZE.get(size.value), count: n });
+      rows.push({
+        customer: customer.value.trim(), region: region.value.trim(), size: BY_SIZE.get(size.value), count: n,
+      });
     }
     return { rows, missingSize, badCount, noRegion };
   }
 
-  function group(rows, keyOf, labelsOf, settings) {
-    const groups = new Map();
+  function sums(groups) {
+    const sum = (key) => groups.reduce((total, g) => total + g[key], 0);
+    return { clusters: sum("clusters"), own: sum("own"), shared: sum("shared"), needed: sum("needed") };
+  }
+
+  // The clusters' cores per region, with each customer's in it: a customer's rounded up to whole cores, and a
+  // region's its customers' added up, so the rows add up. Regions and customers show as first typed, as
+  // "East US 2" and "eastus2" are one region.
+  function tally(rows, settings) {
+    const regions = new Map();
     for (const r of rows) {
-      const key = keyOf(r);
-      let g = groups.get(key);
-      if (!g) {
-        g = { key, labels: labelsOf(r), clusters: 0, own: 0, amortized: 0, total: 0, best: 0, share: 0 };
-        groups.set(key, g);
+      const key = regionKey(r.region);
+      if (!regions.has(key)) {
+        regions.set(key, { key, label: r.region || "(no region)", share: 0, customers: new Map() });
       }
+      const region = regions.get(key);
+      const customerKey = r.customer.toLowerCase();
+      if (!region.customers.has(customerKey)) {
+        region.customers.set(customerKey, { label: r.customer || "(no customer)", clusters: 0, own: 0, total: 0 });
+      }
+      const customer = region.customers.get(customerKey);
       const one = perCluster(r.size, settings);
-      g.clusters += r.count;
-      g.own += r.count * one.own;
-      g.amortized += r.count * one.amortized;
-      g.total += r.count * one.total;
-      g.best += r.count * one.bestTotal;
-      g.share += r.count / one.held;
+      customer.clusters += r.count;
+      customer.own += r.count * one.own;
+      customer.total += r.count * one.total;
+      region.share += r.count / one.held;
     }
-    return [...groups.values()].sort((a, b) => a.labels.join("\u0000").localeCompare(b.labels.join("\u0000")));
+    const byLabel = (a, b) => a.label.localeCompare(b.label);
+    return [...regions.values()].sort(byLabel).map((region) => {
+      const customers = [...region.customers.values()].sort(byLabel).map((c) => {
+        const needed = roundUp(c.total);
+        const own = Math.min(Math.round(c.own), needed);
+        return { label: c.label, clusters: c.clusters, own, shared: needed - own, needed };
+      });
+      return { key: region.key, label: region.label, share: region.share, customers, ...sums(customers) };
+    });
   }
 
-  function customerLabel(r) { return r.customer || "(no customer)"; }
-
-  const POOL_NAMES = { control_plane: "control-plane", system: "system", infra: "infra" };
-  // "a", "a and b", "a, b and c".
-  function andList(items) {
-    return items.length < 2 ? items.join("") : items.slice(0, -1).join(", ") + " and " + items[items.length - 1];
+  // Each VM family's cores on a full management cluster in the region, with these settings and the other machines'
+  // cores split between their pools as in the defaults; null if the region's VM families aren't known.
+  function familyCores(key, settings, controlPlaneCores) {
+    const region = FAMILY_REGIONS && FAMILY_REGIONS.get(key);
+    if (!region) return null;
+    const defaultOther = DATA.other_pools.reduce((total, p) => total + p.cores, 0);
+    const poolCores = { control_plane: controlPlaneCores };
+    for (const p of DATA.other_pools) {
+      poolCores[p.pool] = defaultOther > 0 ? p.cores * settings.otherCores / defaultOther : 0;
+    }
+    const families = new Map();
+    for (const [pool, family] of Object.entries(region.pools)) {
+      families.set(family, (families.get(family) || 0) + (poolCores[pool] || 0));
+    }
+    return families;
   }
 
-  function fill(tbody, rows, columns, emptyText) {
-    tbody.replaceChildren();
-    if (!rows.length) {
-      const td = cell(emptyText, "empty");
-      td.colSpan = columns;
-      tbody.append(row([td]));
-      return;
+  // " of FAMILY" for one VM family, or ": 115 of A and 16 of B": whole cores split in proportion, the biggest family
+  // taking what rounding leaves, so they add up.
+  function byFamily(total, families) {
+    const all = [...families.values()].reduce((sum, c) => sum + c, 0);
+    const parts = [...families].filter(([, c]) => c > 0).map(([family, c]) => ({ family, fraction: c / all }))
+      .sort((a, b) => b.fraction - a.fraction);
+    if (parts.length === 1) return " of " + parts[0].family;
+    let rest = total;
+    for (const p of parts.slice(1)) {
+      p.cores = Math.round(total * p.fraction);
+      rest -= p.cores;
     }
-    for (const cells of rows) tbody.append(row(cells));
+    parts[0].cores = Math.max(0, rest);
+    return ": " + andList(parts.map((p) => whole(p.cores) + " of " + p.family));
   }
 
   function showSettings(settings) {
     const d = DATA.defaults;
     const sizeUnchanged = settings.machinesPerZone === d.machines_per_zone && settings.otherCores === d.other_cores;
     // While the management cluster's machines are the build's placeholders, the numbers aren't production's.
-    const placeholders = d.placeholders && sizeUnchanged;
-    const changed = !sizeUnchanged || settings.limit !== d.limit;
-    document.getElementById("placeholder-banner").hidden = !placeholders;
+    document.getElementById("placeholder-banner").hidden = !(d.placeholders && sizeUnchanged);
     const source = document.getElementById("settings-source");
-    source.textContent = d.from ? "The management cluster's size is from " + d.from + "." : "";
+    source.textContent = d.from ? "Management clusters as in " + d.from + "." : "";
     source.hidden = !(d.from && sizeUnchanged);
-    document.getElementById("settings-summary").textContent =
-      (placeholders ? "Settings (placeholders): " : changed ? "Settings (changed): " : "Settings: ") +
-      settings.machinesPerZone + " control-plane machines per zone, " + WHOLE.format(settings.otherCores) +
-      " cores of other machines, at most " + WHOLE.format(settings.limit) + " clusters per management cluster";
-    document.getElementById("settings-intro").textContent = "For engineers: a full management cluster, with all its " +
-      "machines at their largest, as production plans quota for them. " + (d.placeholders
-        ? "The defaults for its machines are placeholders, not production's: what the 49-node scale test's " +
-          "management cluster had, which held 12 hosted clusters, so wasn't full."
-        : d.from ? "The defaults are from " + d.from + "." : "The defaults are the settings this page was built with.");
+    document.getElementById("settings-intro").textContent = "A full management cluster, with all its machines at " +
+      "their largest, as production plans quota for them. " + (d.placeholders
+        ? "The defaults are placeholders, not production's: what the 49-node scale test's management cluster had, " +
+          "which held 12 hosted clusters, so wasn't full."
+        : d.from ? "The defaults are from " + d.from + "." : "The defaults are the ones this page was built with.");
     document.getElementById("machines-help").textContent = "1 to " + MOST_PER_ZONE + ", each with " +
-      DATA.machine_cores + " cores. The default is " + d.machines_per_zone +
-      (d.placeholders ? ", a placeholder." : ".");
-    document.getElementById("other-help").textContent = "Its system and infra machines, which run its logging, " +
-      "monitoring and cluster-management agents. The default, " + WHOLE.format(d.other_cores) + ", is " +
+      DATA.machine_cores + " cores. Default: " + d.machines_per_zone + (d.placeholders ? ", a placeholder." : ".");
+    document.getElementById("other-help").textContent = "The system and infra machines, which run logging, " +
+      "monitoring and cluster-management agents. Default: " + whole(d.other_cores) + ", " +
       (d.placeholders ? "a placeholder: the 49-node test's " : "") + d.other_text + ".";
-    document.getElementById("limit-help").textContent = "1 to " + WHOLE.format(DATA.clusters_service_limit) + ", as " +
-      "Clusters Service puts no more on one management cluster, though highly available clusters run out of network " +
-      "cards first. The default here is " + WHOLE.format(d.limit) + ". The Service Lifecycle team's capacity alert " +
-      "counts a management cluster as full at 60, and asks for another above 51; what to plan with is theirs to " +
-      "confirm.";
+    document.getElementById("limit-help").textContent = "1 to " + whole(DATA.clusters_service_limit) + ", as " +
+      "Clusters Service puts no more on one management cluster. Default: " + whole(d.limit) + ". The Service " +
+      "Lifecycle team's capacity alert counts a management cluster as full at 60, and asks for another above 51; " +
+      "what to plan with is theirs to confirm.";
   }
 
   function update() {
     const settings = readSettings();
     showSettings(settings);
+    const d = DATA.defaults;
+    const changed = settings.machinesPerZone !== d.machines_per_zone || settings.otherCores !== d.other_cores ||
+                    settings.limit !== d.limit;
     const { rows, missingSize, badCount, noRegion } = readRows();
     const controlPlaneCores = DATA.zones * settings.machinesPerZone * DATA.machine_cores;
-    const managementClusterCores = controlPlaneCores + settings.otherCores;
-    // A region with no room left needs its clusters' share in whole new management clusters, of these cores each.
-    const noRoom = (count, each) => count === 0 ? "0"
-      : WHOLE.format(count) + " \u00d7 " + WHOLE.format(each) + " = " + WHOLE.format(count * each);
+    const managementCluster = controlPlaneCores + settings.otherCores;
+    const regions = tally(rows, settings);
 
-    // A region shows as first typed, in both tables, as "East US 2" and "eastus2" are one region.
-    const regionNames = new Map();
-    for (const r of rows) {
-      if (!regionNames.has(regionKey(r.region))) regionNames.set(regionKey(r.region), r.region || "(no region)");
-    }
-    const regionLabel = (r) => regionNames.get(regionKey(r.region));
-
-    const regions = group(rows, (r) => regionKey(r.region), (r) => [regionLabel(r)], settings);
-    fill(document.querySelector("#by-region tbody"), regions.map((g) => [
-      cell(g.labels[0]), cell(WHOLE.format(g.clusters), "num"), cell(cores(g.own), "num"),
-      cell(cores(g.amortized), "num"), cell(cores(g.total), "num"), cell(WHOLE.format(roundUp(g.total)), "num"),
-      cell(WHOLE.format(roundUp(g.best)), "num"), cell(TWO_DECIMALS.format(g.share), "num"),
-      cell(noRoom(roundUp(g.share), managementClusterCores), "num"),
-    ]), 9, "Add clusters above to see the totals.");
-    const foot = document.querySelector("#by-region tfoot");
+    const body = document.querySelector("#results tbody");
+    const foot = document.querySelector("#results tfoot");
+    body.replaceChildren();
     foot.replaceChildren();
-    if (regions.length) {
-      const sum = (valueOf) => regions.reduce((total, g) => total + valueOf(g), 0);
-      foot.append(row([
-        cell("All regions"), cell(WHOLE.format(sum((g) => g.clusters)), "num"), cell(cores(sum((g) => g.own)), "num"),
-        cell(cores(sum((g) => g.amortized)), "num"), cell(cores(sum((g) => g.total)), "num"),
-        cell(WHOLE.format(sum((g) => roundUp(g.total))), "num"), cell(WHOLE.format(sum((g) => roundUp(g.best))), "num"),
-        cell(TWO_DECIMALS.format(sum((g) => g.share)), "num"),
-        cell(noRoom(sum((g) => roundUp(g.share)), managementClusterCores), "num"),
-      ]));
+    const numbers = (g) => [g.clusters, g.own, g.shared, g.needed].map((n) => cell(whole(n), "num"));
+    if (!regions.length) body.append(emptyRow(5, "Add clusters above to see the cores they need."));
+    for (const region of regions) {
+      body.append(row([cell(region.label), ...numbers(region)], "region"));
+      for (const customer of region.customers) {
+        body.append(row([cell(customer.label), ...numbers(customer)], "customer"));
+      }
+    }
+    if (regions.length > 1) foot.append(row([cell("All regions"), ...numbers(sums(regions))]));
+
+    // Quota comes in whole management clusters: a region with no room left needs its clusters' share of one,
+    // rounded up.
+    document.getElementById("quota-intro").textContent = "Quota comes in whole management clusters of " +
+      whole(managementCluster) + " cores each, so a region with room left needs no new quota for these clusters.";
+    const quota = document.getElementById("quota");
+    quota.replaceChildren();
+    const line = (label, text) => {
+      const li = document.createElement("li");
+      const name = document.createElement("strong");
+      name.textContent = label;
+      li.append(name, ": " + text);
+      quota.append(li);
+    };
+    const newClusters = (n, families, ifText) => n === 0 ? "" : " If " + ifText + ", request " +
+      count(n, "new management cluster", "new management clusters") + ": " +
+      count(n * managementCluster, "core", "cores") + (families ? byFamily(n * managementCluster, families) : "") + ".";
+    for (const region of regions) {
+      const families = familyCores(region.key, settings, controlPlaneCores);
+      const unknown = FAMILY_REGIONS && !families ? " (VM family not known for this region)" : "";
+      line(region.label, "these clusters take " + count(region.needed, "core", "cores") +
+        (families ? byFamily(region.needed, families) : unknown) + "." +
+        newClusters(roundUp(region.share), families, "the region has no room left"));
+    }
+    if (regions.length > 1) {
+      line("All regions", "these clusters take " + count(sums(regions).needed, "core", "cores") + "." +
+        newClusters(regions.reduce((total, g) => total + roundUp(g.share), 0), null, "no region has room left"));
+    }
+    if (!regions.length) {
+      const li = document.createElement("li");
+      li.className = "empty";
+      li.textContent = "Add clusters above to see the quota.";
+      quota.append(li);
     }
 
-    document.getElementById("management-cluster").textContent = "With these settings, a full management cluster has " +
-      WHOLE.format(managementClusterCores) + " cores: " + WHOLE.format(DATA.zones * settings.machinesPerZone) +
-      " control-plane machines with " + WHOLE.format(controlPlaneCores) + " cores, and " +
-      WHOLE.format(settings.otherCores) + " cores of other machines. Quota comes in whole management clusters, " +
-      "planned with all their machines at their largest, so the cores needed are the clusters' average share. If a " +
-      "region's management clusters have room for these clusters, it needs no new quota for them; if they have no " +
-      "room, it needs whole new management clusters, " + WHOLE.format(managementClusterCores) + " cores each, as the " +
-      "last column shows.";
-
-    const families = DATA.vm_families;
-    document.getElementById("families-section").hidden = !families;
-    if (families) {
-      document.getElementById("families-intro").textContent = "Azure grants quota per region and VM family, so these " +
-        "are the cores above by the VM family of the machines they're on" +
-        (families.source ? ", from " + families.source : "") + ". The other machines' cores split between their " +
-        "pools as in the defaults, and each row is rounded up on its own, so a region's families can add up to a " +
-        "little more than its cores needed.";
-      document.getElementById("families-note").textContent = families.note || "";
-      // Each pool's cores on a full management cluster with these settings.
-      const defaultOther = DATA.other_pools.reduce((total, p) => total + p.cores, 0);
-      const poolCores = { control_plane: controlPlaneCores };
-      for (const p of DATA.other_pools) {
-        poolCores[p.pool] = defaultOther > 0 ? p.cores * settings.otherCores / defaultOther : 0;
-      }
-      const familyRows = [];
-      for (const g of regions) {
-        const known = families.regions[g.key];
-        if (!known) {
-          familyRows.push([
-            cell(g.labels[0]), cell("not known for this region"), cell("all machines"),
-            cell(WHOLE.format(roundUp(g.share * managementClusterCores)), "num"),
-            cell(noRoom(roundUp(g.share), managementClusterCores), "num"),
-          ]);
-          continue;
-        }
-        const byFamily = new Map();
-        for (const [pool, family] of Object.entries(known.pools)) {
-          if (!byFamily.has(family)) byFamily.set(family, { cores: 0, pools: [] });
-          byFamily.get(family).cores += poolCores[pool] || 0;
-          byFamily.get(family).pools.push(POOL_NAMES[pool] || pool);
-        }
-        for (const [family, f] of byFamily) {
-          const each = Math.round(f.cores);
-          const machines = byFamily.size === 1 ? "all machines" : andList(f.pools) + " machines";
-          familyRows.push([
-            cell(g.labels[0]), cell(family), cell(machines),
-            cell(WHOLE.format(roundUp(g.share * f.cores)), "num"), cell(noRoom(roundUp(g.share), each), "num"),
-          ]);
-        }
-      }
-      fill(document.querySelector("#by-family tbody"), familyRows, 5, "Add clusters above to see the totals.");
-    }
-
-    const pairs = group(rows, (r) => r.customer.toLowerCase() + "\u0000" + regionKey(r.region),
-                        (r) => [customerLabel(r), regionLabel(r)], settings);
-    fill(document.querySelector("#by-customer tbody"), pairs.map((g) => [
-      cell(g.labels[0]), cell(g.labels[1]), cell(WHOLE.format(g.clusters), "num"), cell(cores(g.own), "num"),
-      cell(cores(g.amortized), "num"), cell(cores(g.total), "num"), cell(WHOLE.format(roundUp(g.total)), "num"),
-      cell(WHOLE.format(roundUp(g.best)), "num"),
-    ]), 8, "Add clusters above to see the totals.");
-
-    const cards = DATA.network_cards_per_machine;
-    document.getElementById("sizes-intro").textContent = "What one hosted cluster of each size reserves, and what " +
-      "it takes on a full management cluster with these settings. A cluster's size goes by its total number of " +
-      "nodes. Clusters take more cores than they reserve, as machines run out of network cards or memory first: " +
-      "each machine has " + WHOLE.format(cards) + " network cards for clusters, and every cluster needs one in each " +
-      "zone, so a management cluster with " + settings.machinesPerZone + " machines per zone holds at most " +
-      WHOLE.format(cards * settings.machinesPerZone) + " clusters, however few cores they reserve. The best case " +
-      "fills a management cluster until it runs out of room, up to the " + WHOLE.format(DATA.clusters_service_limit) +
-      " clusters Clusters Service puts on one.";
-    fill(document.querySelector("#sizes tbody"), SIZES.map((s) => {
+    const reserved = SIZES.map((s) => s.reserves.cpu_cores);
+    const least = cores(Math.min(...reserved));
+    const most = cores(Math.max(...reserved));
+    document.getElementById("sizes-intro").textContent = "A cluster reserves only " +
+      (least === most ? "about " + least : least + " to " + most) + " cores, but takes its share of a whole " +
+      "management cluster: " + whole(managementCluster) + " cores \u00f7 the clusters that fit on one.";
+    document.querySelector("#sizes tbody").replaceChildren(...SIZES.map((s) => {
       const one = perCluster(s, settings);
-      return [
-        cell(sizeLabel(s)), cell(cores(s.reserves.cpu_cores), "num"), cell(cores(s.reserves.memory_gib), "num"),
-        cell(WHOLE.format(one.held), "num"), cell(one.limitedBy), cell(cores(one.own), "num"),
-        cell(cores(one.amortized), "num"), cell(cores(one.total), "num"), cell(WHOLE.format(one.bestHeld), "num"),
-        cell(cores(one.bestTotal), "num"),
-      ];
-    }), 10, "No sizes.");
+      return row([
+        cell(sizeLabel(s)), cell(whole(one.held) + ", " + one.why), cell(cores(one.own), "num"),
+        cell(cores(one.shared), "num"), cell(cores(one.total), "num"), cell(cores(one.bestTotal), "num"),
+      ]);
+    }));
 
     const notices = document.getElementById("notices");
     notices.replaceChildren();
@@ -508,8 +462,9 @@
     if (noRegion) notice(noRegion + (noRegion === 1 ? " row has no region, so it's" : " rows have no region, so " +
                          "they're") + " counted under \u201c(no region)\u201d.");
     if (Object.values(controls).some((c) => c.getAttribute("aria-invalid") === "true")) {
-      notice("A setting isn't valid, so its default is used: see the settings above.");
+      notice("A setting isn't valid, so its default is used: " + ENGINEERS);
     }
+    if (changed) notice("These numbers use changed settings: " + ENGINEERS);
   }
 
   function setDefaults() {
@@ -521,6 +476,13 @@
     controls.limit.value = String(d.limit);
   }
 
+  // Suggests the regions whose VM families are known as the region is typed.
+  if (FAMILY_REGIONS) {
+    const names = document.createElement("datalist");
+    names.id = "region-names";
+    for (const name of [...FAMILY_REGIONS.values()].map((r) => r.name).sort()) names.append(new Option(name, name));
+    document.body.append(names);
+  }
   for (const control of Object.values(controls)) control.addEventListener("input", update);
   document.getElementById("reset-settings").addEventListener("click", () => { setDefaults(); update(); });
   document.getElementById("add-row").addEventListener("click", () => {

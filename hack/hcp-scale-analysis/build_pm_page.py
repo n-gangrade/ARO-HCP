@@ -66,7 +66,7 @@ def others_text(other_machines):
     return " and ".join(parts)
 
 
-def notes(cores, reserved_from, settings_from):
+def notes(cores, reserved_from, settings_from, families):
     """The page's "How these numbers are worked out" list."""
     settings = cores["settings"]
     room = settings["room_per_machine"]
@@ -81,7 +81,7 @@ def notes(cores, reserved_from, settings_from):
         defaults = f"The settings' defaults are from {settings_from}."
     else:
         defaults = "The settings' defaults are the ones this page was built with."
-    return [
+    result = [
         f"What a cluster reserves: the CPU and memory set aside for every part of one hosted cluster's control plane, "
         f"from {source}, with each size's memory from HyperShift's cluster sizing settings. A cluster's size goes by "
         f"its total number of nodes.",
@@ -90,24 +90,30 @@ def notes(cores, reserved_from, settings_from):
         f"availability zones ({settings['zones']} zones). Each {settings['machine_cores']}-core machine has room for "
         f"{room['cpu_cores']:g} cores, {room['memory_gib']:g} GiB of memory, {room['swift_nics']:g} network cards and "
         f"{room['pods']:g} pods once its own system has taken its share, and every cluster needs a network card in "
-        f"each zone, for its router. \u201cLimited by\u201d in the table of cores per cluster shows what runs out "
-        f"first.",
+        f"each zone, for its router.",
         "Own cores: one cluster's share of the machines its control plane runs on, the control-plane machines: their "
         "cores divided by the clusters that fit.",
-        "Amortized cores: one cluster's share of what's there for all the clusters: the management cluster's other "
-        "machines (its system and infra machines, which run its logging, monitoring and cluster-management agents), "
-        "and any room on the control-plane machines left unused because of the limit on clusters per management "
-        "cluster.",
+        "Shared (amortized) cores: one cluster's share of what's there for all the clusters: the management cluster's "
+        "other machines (its system and infra machines, which run its logging, monitoring and cluster-management "
+        "agents), and any room on the control-plane machines left unused because of the limit on clusters per "
+        "management cluster.",
         "Quota is planned per management cluster, for all its machines at their largest, so the cores needed are the "
-        "clusters' average share. A region whose management clusters have room for the clusters needs no new quota for "
-        "them; a region whose management clusters have no room needs whole new ones, as \u201cIf the region has no "
-        "room\u201d shows.",
-        f"Clusters per management cluster: \u201cCores needed\u201d plans for at most {settings['limit']} on each, the "
+        "clusters' average share: a region whose management clusters have room for the clusters needs no new quota "
+        "for them, and one whose management clusters have no room needs whole new ones. Each customer's cores are "
+        "rounded up to whole cores, and a region's are its customers' added up.",
+        f"Clusters per management cluster: the cores needed plan for at most {settings['limit']} on each, the "
         f"settings' default. The Service Lifecycle team's capacity alert counts a management cluster as full at 60 "
-        f"clusters, and asks for another management cluster above 51. \u201cBest case\u201d fills management clusters "
-        f"until they run out of room, up to the {settings['clusters_service_limit']} clusters Clusters Service puts on "
-        f"one: it keeps nothing spare for upgrades, a zone failure or the time a new management cluster takes to add.",
+        f"clusters, and asks for another management cluster above 51. The best case fills management clusters until "
+        f"they run out of room, up to the {settings['clusters_service_limit']} clusters Clusters Service puts on one: "
+        f"it keeps nothing spare for upgrades, a zone failure or the time a new management cluster takes to add.",
         defaults,
+    ]
+    if families:
+        result.append(" ".join(part for part in (
+            f"VM families: from {families['source']}." if families.get("source") else "VM families:",
+            "A region's cores split between its VM families as its management clusters' machines do.",
+            families.get("note")) if part))
+    return result + [
         "Not included: spare room for upgrades, a zone failure or new clusters; the cluster autoscaler of clusters "
         "that use autoscaling; the shared pods some control-plane machines run, such as the HyperShift operator's. "
         "The numbers assume machines are packed as tightly as the rules allow, which production may not manage for "
@@ -153,7 +159,6 @@ def page_data(cores, size_pods, settings_from, families):
         "machine_cores": settings["machine_cores"],
         "zones": settings["zones"],
         "clusters_service_limit": settings["clusters_service_limit"],
-        "network_cards_per_machine": settings["room_per_machine"]["swift_nics"],
         "other_pools": [{"pool": pool["pool"], "cores": pool["machines"] * pool["cores"]}
                         for pool in settings["other_machines"]],
         "vm_families": families,
@@ -165,7 +170,7 @@ def page_data(cores, size_pods, settings_from, families):
             "placeholders": settings.get("placeholders", True),
             "from": settings_from,
         },
-        "notes": notes(cores, size_pods.get("reserved_from"), settings_from),
+        "notes": notes(cores, size_pods.get("reserved_from"), settings_from, families),
     }
 
 
