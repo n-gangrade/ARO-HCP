@@ -162,6 +162,10 @@ the numbers don't change.
   for large and 388.0 for xxlarge, as `cluster.clustersizingconfiguration.yaml` sets memory for each of these sizes,
   but not CPU. The 3- and 6-node runs (OpenShift 4.20) reserved 4.295 cores and 43.1 GiB, and the 49-node run (4.22)
   4.555 cores and 43.6 GiB.
+- **Checked against production:** in November 2026, production's clusters of each size from small to xlarge
+  reserved within 1 GiB of `size-pods.json`'s reserved totals, slightly less. To add up reservations from Azure
+  Monitor, count each kube-state-metrics series once: it keeps one per Prometheus replica (the `prometheus_replica`
+  label), so a plain sum doubles them, as the repo's alert rules' `max without (prometheus_replica)` avoids.
 - **Two sizing settings that don't take effect:** `cluster.clustersizingconfiguration.yaml` also sets the memory of
   `ovnkube-control-plane` (for every size) and `multus-admission-controller` (for large and up), but no run got
   those settings: whatever its size, every run reserved 200 MiB per copy for the first and 50 MiB for the second,
@@ -191,14 +195,15 @@ what one copy needs (CPU, memory and SWIFT NICs), in two versions: what it reser
   against 4.555), and SREs can move a cluster to a bigger size than its nodes call for
   (`docs/ops/override-cluster-size.md`). For every other size, each container the sizing file sets memory for gets
   that size's setting instead of small's. So every size has numbers without a test run of its own, xlarge
-  included: one cluster reserves 43.6 GiB if it's small, 75.3 if medium, 133.3 if large, 271.3 if xlarge and 388.3
-  if xxlarge, and 4.555 cores whatever its size, as the file sets memory for these sizes but not CPU.
+  included: with the cluster autoscaler (below), one cluster reserves 43.7 GiB if it's small, 77.3 if medium, 137.3
+  if large, 277.3 if xlarge and 400.3 if xxlarge, and 4.565 cores whatever its size, as the file sets memory for these
+  sizes but not CPU.
   - The file's settings for `ovnkube-control-plane` and `multus-admission-controller` are left out
     (`SETTINGS_LEFT_OUT`), as no test run got them (see "Two sizing settings that don't take effect").
-  - The file also sets memory for the cluster autoscaler, 2 to 12 GiB a copy from medium up, but no test cluster
-    ran one, so it isn't included (`NOT_TESTED`). `not_included` lists it for each size, with 1 copy and the
-    file's setting, or null for small, where the file sets none: on the 49-node run's management cluster, 1 of the
-    12 hosted clusters ran one, with 1 copy.
+  - The file also sets memory for the cluster autoscaler, 2 to 12 GiB a copy from medium up. No test cluster ran one
+    (on the 49-node run's management cluster, 1 of the 12 hosted clusters did), but in production every cluster from
+    medium up does (checked in November 2026), so every size gets one copy (`ADDED`; `added` lists it for each
+    size): HyperShift's defaults, 10m of CPU and 60 MiB of memory, or the file's memory from medium up.
   - If the run had no router, the reserved pods get the newest one recorded (`reserved_from.router_from`). With
     none, the script stops, as the router's copies decide each cluster's SWIFT NICs.
   - Two checks warn if this way of working them out stops holding: every test run should have got its size's
@@ -206,7 +211,7 @@ what one copy needs (CPU, memory and SWIFT NICs), in two versions: what it reser
     out as recorded. Both hold: worked out from a 12-node run, for example, the 60-, 120-, 250- and 500-node runs
     come out exactly as recorded. But the 49-node run is the only one on its OpenShift version, so the second check
     can't cover it, and no run is xlarge, so neither covers xlarge's settings. So the script also stops if the
-    sizing file sets anything for a container the 49-node run doesn't have, unless `NOT_TESTED` lists it, which
+    sizing file sets anything for a container the 49-node run doesn't have, unless `ADDED` lists it, which
     catches a misspelled name in any size.
 - **Used** pods need their containers' p95 of all copies' readings, added up, so the numbers are what the pods use:
   what clusters could reserve if their reservations matched their use. Each size uses the largest test cluster
@@ -276,16 +281,16 @@ were on one machine.
 One machine in each zone (3 machines, 96 cores) holds 7 small or 7 medium clusters, as their SWIFT NICs run out
 first: every cluster's router puts a copy, and a SWIFT NIC, in every zone. It holds 5 large, 2 xlarge or 1
 xxlarge cluster, as memory runs out first. So 10 small clusters need 6 machines, 192 cores, although their pods
-reserve 45.5 cores; and a single cluster of any size needs 3 machines, one in each zone.
+reserve 45.6 cores; and a single cluster of any size needs 3 machines, one in each zone.
 
 **How close it comes to the fewest machines possible:** `check_packing.py` checks every packing against the rules,
 and works out the fewest machines possible with an exact solver, doing the same arithmetic, to compare. In 155
 cases, no packing broke a rule or disagreed with the solver. It needed the fewest machines for every mix of small and
-medium clusters (40 of 40), and for 66 of 75 counts of one size alone (1 to 15 clusters); the other 9, with 8 or more
-large, xlarge or xxlarge clusters, needed 1 or 2 more. Of 40 mixes with larger sizes, in one run it needed the
-fewest in 18 and 1 to 4 more in 18, and the solver ran out of time on the other 4; these counts vary between runs, as
+medium clusters (40 of 40), and for 62 of 75 counts of one size alone (1 to 15 clusters); the other 13, with 8 or more
+large, xlarge or xxlarge clusters, needed 1 to 3 more. Of 40 mixes with larger sizes, in one run it needed the
+fewest in 15 and 1 to 4 more in 20, and the solver ran out of time on the other 5; these counts vary between runs, as
 the solver has a time limit. The gap grows with the number of larger clusters: 20
-large clusters need 14 machines here and 12 at the fewest, 30 need 21 and 17. Adding a cluster can even lower the
+large clusters need 14 machines here and 12 at the fewest, 30 need 22 and 18. Adding a cluster can even lower the
 answer: 14 large clusters need 11 machines here, 15 only 9. No packing that follows the rules needs fewer than the
 fewest, so it never comes in under that. Rerun `check_packing.py` after changing the packing (about 11 minutes).
 
@@ -305,8 +310,6 @@ Not included yet:
   49-node run's 18 control-plane machines, such as the HyperShift operator's, mgmt-agent's, monitoring's and one
   cluster's ACM agents.
 - Spare room for upgrades, a zone failure or new clusters.
-- The cluster autoscaler of clusters that use autoscaling (`not_included` in `size-pods.json`), and the kubelet's
-  eviction threshold, under 1 GiB of each machine's memory.
 
 ## Cores per cluster on a full management cluster
 
@@ -374,9 +377,9 @@ With these settings:
 |---|---|---|---|---|---|
 | small | 42 | 13.71 | 2.48 | 16.19 | SWIFT NICs |
 | medium | 42 | 13.71 | 2.48 | 16.19 | SWIFT NICs |
-| large | 32 | 18.00 | 3.25 | 21.25 | memory |
+| large | 31 | 18.58 | 3.35 | 21.93 | memory |
 | xlarge | 15 | 38.40 | 6.93 | 45.33 | memory |
-| xxlarge | 11 | 52.36 | 9.45 | 61.82 | memory |
+| xxlarge | 10 | 57.60 | 10.40 | 68.00 | memory |
 
 So 10 small clusters take about 162 cores, where on machines of their own they need 192 (`pack_clusters.py`). With
 more machines per zone, a cluster's own cores barely change, while the other machines' cores are shared by more
@@ -397,10 +400,9 @@ Not included:
 - **Mixing sizes:** each size's share assumes a management cluster full of that size. Smaller clusters are stopped by
   the limit or SWIFT NICs and larger ones by memory, so a management cluster holding both can hold more than their
   shares add up to, by up to about half. For example, with these settings one holds 35 small and 7 xxlarge clusters,
-  whose shares add up to 1.47 management clusters (checked with the same rules and solver; one more xxlarge doesn't
+  whose shares add up to 1.53 management clusters (checked with the same rules and solver; one more xxlarge doesn't
   fit). The PM page keeps the shares, which can overstate a region that mixes them.
-- Spare room for upgrades, a zone failure or new clusters, and the cluster autoscaler of clusters that use
-  autoscaling.
+- Spare room for upgrades, a zone failure or new clusters.
 - **The shared pods on the control-plane machines**, which in the 49-node run used 3.5 GiB and about 2.5 cores in all.
 - **The infra machines' limits:** each hosted cluster runs 5 ACM agent pods on them. In the 49-node run, the 3 infra
   machines ran 129 pods, 52 of them agents for 11 clusters. With 225 pod slots each (`maxPods` in
@@ -558,8 +560,8 @@ Each item fixes a problem these runs had:
    bottom of medium and large instead of the top of small and medium; there's no run for xlarge (253 to 360 nodes),
    and the only run for xxlarge (500 nodes) has no churn phase.
 5. **Clusters set up like production's,** with a router in every run. Only the 49-node run had one, so its router
-   numbers stand in for every size. Some runs with autoscaling would also show what the cluster autoscaler reserves
-   and uses, as no run had one.
+   numbers stand in for every size. Some runs with autoscaling would also show what the cluster autoscaler uses, as
+   no run had one.
 6. **Clean dumps:** each reading once (the 250- and 500-node dumps repeat 60,397 and 30,417 readings), one copy of
    each series (the 49-node dump keeps two of every kube-state-metrics series, one per Prometheus replica, which
    doubles its reservations), no missing readings (the 3- and 6-node dumps miss about a quarter of their CPU

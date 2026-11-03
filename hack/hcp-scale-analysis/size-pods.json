@@ -17,7 +17,7 @@
     "nodes_from": "the size's lowest total node count, infra nodes as well as workers",
     "nodes_to": "the size's highest total node count; null means no upper limit",
     "reserved": "what one copy of each component reserves in a cluster on reserved_from's OpenShift version: its containers' resource requests in that run, with the sizing file's settings for this size",
-    "not_included": "containers no test run had, so the reserved pods don't include them: how many copies they run, and the sizing file's settings for this size, per copy; null where it sets none, as what they reserve then isn't known",
+    "added": "containers no test run had, which production's clusters run, added to the reserved pods: how many copies they run and what one copy reserves, with the sizing file's settings for this size where it has them",
     "used": "what one copy of each component uses: its containers' p95 of all copies' readings, added up",
     "run": "the test run the used pods come from",
     "run_total_nodes": "that run's total node count",
@@ -38,18 +38,18 @@
       "nodes_to": 60,
       "reserved": {
         "totals": {
-          "pods": 67,
-          "cpu_cores": 4.555,
-          "memory_gib": 43.615,
+          "pods": 68,
+          "cpu_cores": 4.565,
+          "memory_gib": 43.674,
           "swift_nics": 3
         },
-        "not_included": [
+        "added": [
           {
             "component": "cluster-autoscaler",
             "container": "cluster-autoscaler",
             "copies": 1,
-            "memory_gib": null,
-            "cpu_cores": null
+            "cpu_cores": 0.01,
+            "memory_gib": 0.059
           }
         ],
         "pods": [
@@ -88,6 +88,7 @@
           {"component": "csi-snapshot-controller-operator", "copies": 1, "cpu_cores": 0.01, "memory_gib": 0.063, "swift_nics": 0, "one_per_zone": false},
           {"component": "kube-state-metrics-hcp", "copies": 1, "cpu_cores": 0.01, "memory_gib": 0.062, "swift_nics": 0, "one_per_zone": false},
           {"component": "azure-cloud-controller-manager", "copies": 1, "cpu_cores": 0.075, "memory_gib": 0.059, "swift_nics": 0, "one_per_zone": false},
+          {"component": "cluster-autoscaler", "copies": 1, "cpu_cores": 0.01, "memory_gib": 0.059, "swift_nics": 0, "one_per_zone": false},
           {"component": "azure-disk-csi-driver-operator", "copies": 1, "cpu_cores": 0.01, "memory_gib": 0.049, "swift_nics": 0, "one_per_zone": false},
           {"component": "azure-file-csi-driver-operator", "copies": 1, "cpu_cores": 0.01, "memory_gib": 0.049, "swift_nics": 0, "one_per_zone": false},
           {"component": "cluster-node-tuning-operator", "copies": 1, "cpu_cores": 0.01, "memory_gib": 0.049, "swift_nics": 0, "one_per_zone": false},
@@ -166,18 +167,18 @@
       "nodes_to": 120,
       "reserved": {
         "totals": {
-          "pods": 67,
-          "cpu_cores": 4.555,
-          "memory_gib": 75.323,
+          "pods": 68,
+          "cpu_cores": 4.565,
+          "memory_gib": 77.323,
           "swift_nics": 3
         },
-        "not_included": [
+        "added": [
           {
             "component": "cluster-autoscaler",
             "container": "cluster-autoscaler",
             "copies": 1,
-            "memory_gib": 2.0,
-            "cpu_cores": null
+            "cpu_cores": 0.01,
+            "memory_gib": 2.0
           }
         ],
         "pods": [
@@ -187,6 +188,7 @@
           {"component": "openshift-controller-manager", "copies": 2, "cpu_cores": 0.1, "memory_gib": 2.0, "swift_nics": 0, "one_per_zone": true},
           {"component": "etcd", "copies": 3, "cpu_cores": 0.36, "memory_gib": 1.293, "swift_nics": 0, "one_per_zone": true},
           {"component": "openshift-apiserver", "copies": 3, "cpu_cores": 0.125, "memory_gib": 1.049, "swift_nics": 0, "one_per_zone": true},
+          {"component": "cluster-autoscaler", "copies": 1, "cpu_cores": 0.01, "memory_gib": 2.0, "swift_nics": 0, "one_per_zone": false},
           {"component": "kube-scheduler", "copies": 2, "cpu_cores": 0.025, "memory_gib": 1.0, "swift_nics": 0, "one_per_zone": true},
           {"component": "packageserver", "copies": 3, "cpu_cores": 0.03, "memory_gib": 0.283, "swift_nics": 0, "one_per_zone": true},
           {"component": "ovnkube-control-plane", "copies": 2, "cpu_cores": 0.03, "memory_gib": 0.234, "swift_nics": 0, "one_per_zone": true},
@@ -293,18 +295,18 @@
       "nodes_to": 252,
       "reserved": {
         "totals": {
-          "pods": 67,
-          "cpu_cores": 4.555,
-          "memory_gib": 133.323,
+          "pods": 68,
+          "cpu_cores": 4.565,
+          "memory_gib": 137.323,
           "swift_nics": 3
         },
-        "not_included": [
+        "added": [
           {
             "component": "cluster-autoscaler",
             "container": "cluster-autoscaler",
             "copies": 1,
-            "memory_gib": 4.0,
-            "cpu_cores": null
+            "cpu_cores": 0.01,
+            "memory_gib": 4.0
           }
         ],
         "pods": [
@@ -312,6 +314,7 @@
           {"component": "etcd", "copies": 3, "cpu_cores": 0.36, "memory_gib": 2.293, "swift_nics": 0, "one_per_zone": true},
           {"component": "openshift-apiserver", "copies": 3, "cpu_cores": 0.125, "memory_gib": 2.049, "swift_nics": 0, "one_per_zone": true},
           {"component": "openshift-controller-manager", "copies": 2, "cpu_cores": 0.1, "memory_gib": 3.0, "swift_nics": 0, "one_per_zone": true},
+          {"component": "cluster-autoscaler", "copies": 1, "cpu_cores": 0.01, "memory_gib": 4.0, "swift_nics": 0, "one_per_zone": false},
           {"component": "cluster-policy-controller", "copies": 2, "cpu_cores": 0.01, "memory_gib": 2.0, "swift_nics": 0, "one_per_zone": true},
           {"component": "kube-controller-manager", "copies": 2, "cpu_cores": 0.1, "memory_gib": 2.0, "swift_nics": 0, "one_per_zone": true},
           {"component": "kube-scheduler", "copies": 2, "cpu_cores": 0.025, "memory_gib": 2.0, "swift_nics": 0, "one_per_zone": true},
@@ -420,18 +423,18 @@
       "nodes_to": 360,
       "reserved": {
         "totals": {
-          "pods": 67,
-          "cpu_cores": 4.555,
-          "memory_gib": 271.323,
+          "pods": 68,
+          "cpu_cores": 4.565,
+          "memory_gib": 277.323,
           "swift_nics": 3
         },
-        "not_included": [
+        "added": [
           {
             "component": "cluster-autoscaler",
             "container": "cluster-autoscaler",
             "copies": 1,
-            "memory_gib": 6.0,
-            "cpu_cores": null
+            "cpu_cores": 0.01,
+            "memory_gib": 6.0
           }
         ],
         "pods": [
@@ -441,6 +444,7 @@
           {"component": "kube-controller-manager", "copies": 2, "cpu_cores": 0.1, "memory_gib": 6.0, "swift_nics": 0, "one_per_zone": true},
           {"component": "openshift-controller-manager", "copies": 2, "cpu_cores": 0.1, "memory_gib": 6.0, "swift_nics": 0, "one_per_zone": true},
           {"component": "etcd", "copies": 3, "cpu_cores": 0.36, "memory_gib": 2.293, "swift_nics": 0, "one_per_zone": true},
+          {"component": "cluster-autoscaler", "copies": 1, "cpu_cores": 0.01, "memory_gib": 6.0, "swift_nics": 0, "one_per_zone": false},
           {"component": "kube-scheduler", "copies": 2, "cpu_cores": 0.025, "memory_gib": 3.0, "swift_nics": 0, "one_per_zone": true},
           {"component": "packageserver", "copies": 3, "cpu_cores": 0.03, "memory_gib": 0.283, "swift_nics": 0, "one_per_zone": true},
           {"component": "ovnkube-control-plane", "copies": 2, "cpu_cores": 0.03, "memory_gib": 0.234, "swift_nics": 0, "one_per_zone": true},
@@ -547,18 +551,18 @@
       "nodes_to": null,
       "reserved": {
         "totals": {
-          "pods": 67,
-          "cpu_cores": 4.555,
-          "memory_gib": 388.323,
+          "pods": 68,
+          "cpu_cores": 4.565,
+          "memory_gib": 400.323,
           "swift_nics": 3
         },
-        "not_included": [
+        "added": [
           {
             "component": "cluster-autoscaler",
             "container": "cluster-autoscaler",
             "copies": 1,
-            "memory_gib": 12.0,
-            "cpu_cores": null
+            "cpu_cores": 0.01,
+            "memory_gib": 12.0
           }
         ],
         "pods": [
@@ -567,6 +571,7 @@
           {"component": "cluster-policy-controller", "copies": 2, "cpu_cores": 0.01, "memory_gib": 8.0, "swift_nics": 0, "one_per_zone": true},
           {"component": "kube-controller-manager", "copies": 2, "cpu_cores": 0.1, "memory_gib": 8.0, "swift_nics": 0, "one_per_zone": true},
           {"component": "openshift-controller-manager", "copies": 2, "cpu_cores": 0.1, "memory_gib": 8.0, "swift_nics": 0, "one_per_zone": true},
+          {"component": "cluster-autoscaler", "copies": 1, "cpu_cores": 0.01, "memory_gib": 12.0, "swift_nics": 0, "one_per_zone": false},
           {"component": "kube-scheduler", "copies": 2, "cpu_cores": 0.025, "memory_gib": 6.0, "swift_nics": 0, "one_per_zone": true},
           {"component": "etcd", "copies": 3, "cpu_cores": 0.36, "memory_gib": 3.293, "swift_nics": 0, "one_per_zone": true},
           {"component": "packageserver", "copies": 3, "cpu_cores": 0.03, "memory_gib": 0.283, "swift_nics": 0, "one_per_zone": true},

@@ -15,10 +15,11 @@ reserved: what each copy reserves (its containers' resource requests) in a clust
 OpenShift version of the newest test run with reservations, which they come from, as its pods are the
 closest to today's (RESERVED_FROM picks another run). Each size gets the sizing file's settings for it
 instead of the run's own size's. The settings in SETTINGS_LEFT_OUT are left out, as no test run got
-them: the network operator, not HyperShift, creates those pods. Containers no test run had (NOT_TESTED:
-the cluster autoscaler) aren't included; the output lists them with the sizing file's settings. If the
-run had no router, the router comes from the newest run that had one. It stops if the sizing file sets
-anything for a container the run doesn't have and NOT_TESTED doesn't list, which catches a misspelled
+them: the network operator, not HyperShift, creates those pods. Containers no test run had, which
+production's clusters run (ADDED: the cluster autoscaler), are added with what one copy reserves where
+the sizing file sets nothing, and the sizing file's settings where it does; the output lists them. If
+the run had no router, the router comes from the newest run that had one. It stops if the sizing file
+sets anything for a container the run doesn't have and ADDED doesn't list, which catches a misspelled
 name in any size. Two checks warn if this way of working them out doesn't hold: every run should have
 got its size's settings, and each run, worked out the same way from another small run on its OpenShift
 version, should come out as recorded.
@@ -70,10 +71,13 @@ RESERVED_FROM = None
 # them, and HyperShift applies the sizing file only to the pods it creates. Checked each time this runs.
 SETTINGS_LEFT_OUT = {("ovnkube-control-plane", "ovnkube-control-plane"),
                      ("multus-admission-controller", "multus-admission-controller")}
-# Containers the sizing file has settings for that no test run had, with how many copies they run: the cluster
-# autoscaler, which 1 of the 12 hosted clusters on the 49-node run's management cluster ran, with 1 copy. The reserved
-# pods don't include them; not_included lists them.
-NOT_TESTED = {("cluster-autoscaler", "cluster-autoscaler"): 1}
+# Containers no test run had, which production's clusters run, with how many copies and what one copy reserves where
+# the sizing file sets nothing: the cluster autoscaler. On the 49-node run's management cluster, 1 of the 12 hosted
+# clusters ran one; in production, every cluster from medium up does (checked in November 2026), so every cluster
+# gets one, to be safe. It reserves HyperShift's defaults (10m of CPU and 60Mi of memory, as in its Azure fixture,
+# control-plane-operator/controllers/hostedcontrolplane/testdata/cluster-autoscaler/AROSwift), or, from medium up, the
+# sizing file's memory.
+ADDED = {("cluster-autoscaler", "cluster-autoscaler"): {"copies": 1, "cpu_cores": 0.01, "memory_gib": 60 / 1024}}
 ROUTER = "router"
 SWIFT_NICS_PER_COPY = {ROUTER: 1}
 ZONES = 3  # availability zones a management cluster's machines are spread over
@@ -87,9 +91,9 @@ FIELDS = {
     "nodes_to": "the size's highest total node count; null means no upper limit",
     "reserved": "what one copy of each component reserves in a cluster on reserved_from's OpenShift version: "
                 "its containers' resource requests in that run, with the sizing file's settings for this size",
-    "not_included": "containers no test run had, so the reserved pods don't include them: how many copies they run, "
-                    "and the sizing file's settings for this size, per copy; null where it sets none, as what they "
-                    "reserve then isn't known",
+    "added": "containers no test run had, which production's clusters run, added to the reserved pods: how many "
+             "copies they run and what one copy reserves, with the sizing file's settings for this size where it has "
+             "them",
     "used": "what one copy of each component uses: its containers' p95 of all copies' readings, added up",
     "run": "the test run the used pods come from",
     "run_total_nodes": "that run's total node count",
@@ -274,20 +278,20 @@ def recorded_containers(run):
 
 
 def check_names(base, settings):
-    """Stop if the sizing file sets anything for a container the base run doesn't have, unless NOT_TESTED lists it, or
-    if NOT_TESTED lists a container the sizing file sets nothing for. That catches a misspelled name in any size,
-    including those no test run is."""
+    """Stop if the sizing file sets anything for a container the base run doesn't have, unless ADDED lists it, or if
+    ADDED lists a container the sizing file sets nothing for. That catches a misspelled name in any size, including
+    those no test run is."""
     have = recorded_containers(base)
     missing = sorted({f"{component} / {container} ({size})" for size, size_settings in settings.items()
                       for component, container in size_settings
-                      if (component, container) not in have and (component, container) not in NOT_TESTED})
+                      if (component, container) not in have and (component, container) not in ADDED})
     if missing:
         sys.exit(f"the sizing file sets resources for containers {base['run']} doesn't have: {', '.join(missing)}. Fix "
-                 "the name if it's misspelled, or add the container to NOT_TESTED if no test run had it")
-    unset = sorted(f"{component} / {container}" for component, container in NOT_TESTED
+                 "the name if it's misspelled, or add the container to ADDED if no test run had it")
+    unset = sorted(f"{component} / {container}" for component, container in ADDED
                    if not any((component, container) in size_settings for size_settings in settings.values()))
     if unset:
-        sys.exit(f"NOT_TESTED lists containers the sizing file sets nothing for: {', '.join(unset)}")
+        sys.exit(f"ADDED lists containers the sizing file sets nothing for: {', '.join(unset)}")
 
 
 def reserved_router(runs, base):
@@ -307,11 +311,10 @@ def reserved_router(runs, base):
 
 
 def reserved_containers(run, size, settings):
-    """({(component, container): {"copies", "memory_gib", "cpu_cores"}}, [not included]): what `run`'s containers
-    would reserve in a cluster of `size`. A container the sizing file has a setting for gets the one for `size`
-    instead of the one for the run's own size, unless it's in SETTINGS_LEFT_OUT. Not included are the containers in
-    NOT_TESTED that the run doesn't have, with their copies and the file's settings for `size`, or null where it
-    sets none."""
+    """({(component, container): {"copies", "memory_gib", "cpu_cores"}}, [added]): what `run`'s containers would
+    reserve in a cluster of `size`. A container the sizing file has a setting for gets the one for `size` instead of
+    the one for the run's own size, unless it's in SETTINGS_LEFT_OUT. Added are the containers in ADDED that the run
+    doesn't have, with ADDED's copies and numbers and the file's settings for `size`."""
     own = settings[size_of(run)]
     containers = {}
     for key, reserved in recorded_containers(run).items():
@@ -324,14 +327,15 @@ def reserved_containers(run, size, settings):
                          f"size, which has none for the {size} size, so what it reserves there is unknown; set "
                          "RESERVED_FROM to a smaller run")
         containers[key] = numbers
-    not_included = []
-    for (component, container), copies in sorted(NOT_TESTED.items()):
+    added = []
+    for (component, container), default in sorted(ADDED.items()):
         if (component, container) not in containers:
-            setting = settings[size].get((component, container), {})
-            not_included.append({"component": component, "container": container, "copies": copies,
-                                 **{name: round(setting[name], DECIMALS) if name in setting else None
-                                    for name in ("memory_gib", "cpu_cores")}})
-    return containers, not_included
+            numbers = {name: round(value, DECIMALS) if name != "copies" else value for name, value in default.items()}
+            numbers.update({name: round(value, DECIMALS)
+                            for name, value in settings[size].get((component, container), {}).items()})
+            containers[(component, container)] = numbers
+            added.append({"component": component, "container": container, **numbers})
+    return containers, added
 
 
 def pods_from(containers):
@@ -389,7 +393,9 @@ def check_projection(runs, settings):
         if not run.get("reservations") or not bases:
             continue
         base = max(bases, key=newest)
-        predicted, _ = reserved_containers(base, size_of(run), settings)
+        predicted, added = reserved_containers(base, size_of(run), settings)
+        for item in added:  # no test run had these, so there's nothing recorded to compare them with
+            predicted.pop((item["component"], item["container"]))
         recorded = recorded_containers(run)
         wrong = [f"{component} / {container}" for component, container in sorted(predicted.keys() | recorded.keys())
                  if differs(predicted.get((component, container)), recorded.get((component, container)))]
@@ -443,7 +449,7 @@ def main():
     choices = runs_for_sizes(runs)
     sizes = []
     for name, low, high in SIZE_CLASSES:
-        containers, not_included = reserved_containers(base, name, settings)
+        containers, added = reserved_containers(base, name, settings)
         for key, reserved_per_copy in router_containers.items():
             containers[key] = {number: reserved_per_copy[number] for number in ("copies", "memory_gib", "cpu_cores")}
         reserved = pods_from(containers)
@@ -453,7 +459,7 @@ def main():
             "size": name,
             "nodes_from": low,
             "nodes_to": high,
-            "reserved": {"totals": totals(reserved), "not_included": not_included, "pods": reserved},
+            "reserved": {"totals": totals(reserved), "added": added, "pods": reserved},
             "used": {
                 "run": run["run"],
                 "run_total_nodes": run["total_nodes"],
@@ -485,14 +491,14 @@ def main():
         return f"{size['nodes_from']}-{size['nodes_to'] if size['nodes_to'] is not None else ''}"
 
     def gib_text(value):
-        return "unknown" if value is None else f"{value:g} GiB"
+        return f"{value:g} GiB"
 
     print(f"Reserved in a cluster on OpenShift {base['ocp_version']}, from {base['run']} ({size_of(base)}):")
-    print(f"{'size':>8} {'nodes':>9} {'pods':>5} {'cores':>6} {'GiB':>6} {'NICs':>5}  not included")
+    print(f"{'size':>8} {'nodes':>9} {'pods':>5} {'cores':>6} {'GiB':>6} {'NICs':>5}  added")
     for size in sizes:
         total = size["reserved"]["totals"]
         extra = ", ".join(f"{item['component']} ({item['copies']} {'copy' if item['copies'] == 1 else 'copies'}, "
-                          f"{gib_text(item['memory_gib'])})" for item in size["reserved"]["not_included"])
+                          f"{gib_text(item['memory_gib'])})" for item in size["reserved"]["added"])
         print(f"{size['size']:>8} {nodes(size):>9} {total['pods']:5d} {total['cpu_cores']:6.1f} "
               f"{total['memory_gib']:6.1f} {total['swift_nics']:5d}  {extra}")
     print("Used (p95 of the readings):")

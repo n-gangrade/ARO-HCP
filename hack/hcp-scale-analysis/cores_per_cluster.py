@@ -27,10 +27,9 @@ machines at their largest, so a region that needs another management cluster nee
 (new_management_cluster_cores). It writes cores-per-cluster.json next to this script, or cores-per-cluster-used.json
 with --basis used, which packs what the pods use instead of what they reserve.
 
-Not included: spare room for upgrades, a zone failure or new clusters; the cluster autoscaler of clusters that use
-autoscaling; the shared pods some control-plane machines run, such as the HyperShift operator's, which in the
-49-node run used 3.5 GiB and about 2.5 cores in all; and the infra machines' limits: each hosted cluster runs 5 ACM
-agent pods there.
+Not included: spare room for upgrades, a zone failure or new clusters; the shared pods some control-plane machines
+run, such as the HyperShift operator's, which in the 49-node run used 3.5 GiB and about 2.5 cores in all; and the
+infra machines' limits: each hosted cluster runs 5 ACM agent pods there.
 
 Usage:
   python3 cores_per_cluster.py [--basis reserved|used] [--full N] [--other POOL=MACHINESxCORES ...] [--limit N]

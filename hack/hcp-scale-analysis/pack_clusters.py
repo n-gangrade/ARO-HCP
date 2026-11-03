@@ -31,9 +31,7 @@ machines with other customers'. Not included either:
 - the machines every management cluster keeps whatever its load: its system and infra pools, and the
   minimum number of machines production keeps in each of its control-plane pools;
 - the shared pods that run on some control-plane machines, such as the HyperShift operator's;
-- spare room for upgrades, a zone failure or new clusters;
-- the cluster autoscaler, which clusters that use autoscaling run (not_included in size-pods.json);
-- the kubelet's eviction threshold, under 1 GiB of each machine's memory.
+- spare room for upgrades, a zone failure or new clusters.
 
 --per-set shows how many clusters of each size fit on one machine in each zone.
 

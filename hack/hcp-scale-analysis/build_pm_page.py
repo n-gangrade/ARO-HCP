@@ -85,8 +85,10 @@ def notes(cores, reserved_from, settings_from, families):
                  else "worked out for a scale test's machine")
     result = [
         f"What a cluster reserves: the CPU and memory set aside for every part of one hosted cluster's control plane, "
-        f"from {source}, with each size's memory from HyperShift's cluster sizing settings. A cluster's size goes by "
-        f"its total number of nodes.",
+        f"from {source}, with each size's memory from HyperShift's cluster sizing settings, and a cluster autoscaler, "
+        f"which production's clusters from medium up all run. A cluster's size goes by its total number of nodes. In "
+        f"November 2026, production's clusters of each size from small to xlarge reserved within 1 GiB of these "
+        f"numbers.",
         f"How many fit: the most clusters of each size that fit on a full management cluster, worked out exactly and "
         f"checked part by part against production's rules. Copies of the same part of a cluster go in different "
         f"availability zones ({settings['zones']} zones). Each {settings['machine_cores']}-core machine has room for "
@@ -120,8 +122,8 @@ def notes(cores, reserved_from, settings_from, families):
     return result + [
         "Not included: spare room for upgrades, a zone failure or new clusters; the extra machines AKS adds to a pool "
         "while upgrading it (10% more), which a full pool needs quota for; test clusters, which production's "
-        "management clusters also run; the cluster autoscaler of clusters that use autoscaling; the shared pods some "
-        "control-plane machines run, such as the HyperShift operator's. The numbers assume machines are packed as "
+        "management clusters also run; the shared pods some control-plane machines run, such as the HyperShift "
+        "operator's. The numbers assume machines are packed as "
         "tightly as the rules allow, which production may not manage for large and bigger clusters. Mixing sizes on a "
         "management cluster packs better than their shares add up to, as smaller clusters are stopped by the limit "
         "or network cards and bigger ones by memory: a region with both can be overstated by up to about half.",
